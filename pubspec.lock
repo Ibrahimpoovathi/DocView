@@ -50,13 +50,13 @@ packages:
     source: hosted
     version: "2.1.1"
   archive:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: archive
-      sha256: cb6a278ef2dbb298455e1a713bda08524a175630ec643a242c399c932a0a1f7d
+      sha256: "0d58d1fa1fddf6588251ccf2819f3fb3b6d0452c1b2813ac7413a05592bfbefe"
       url: "https://pub.dev"
     source: hosted
-    version: "3.6.1"
+    version: "4.5.2"
   args:
     dependency: transitive
     description:
@@ -234,7 +234,7 @@ packages:
     source: hosted
     version: "0.3.5+5"
   crypto:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: crypto
       sha256: c8ea0233063ba03258fbcf2ca4d6dadfefe14f02fab57702265467a19f27fadf
@@ -313,14 +313,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.31.0"
-  epubx:
-    dependency: "direct main"
-    description:
-      name: epubx
-      sha256: "0ab9354efa177c4be52c46f857bc15bf83f83a92667fb673465c8f89fca26db3"
-      url: "https://pub.dev"
-    source: hosted
-    version: "4.0.0"
   fake_async:
     dependency: transitive
     description:
@@ -592,13 +584,13 @@ packages:
     source: hosted
     version: "4.1.2"
   image:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: image
-      sha256: "8e9d133755c3e84c73288363e6343157c383a0c6c56fc51afcc5d4d7180306d6"
+      sha256: "89ed75b2f8231fe676808c5564f9590d728024ded7ac782a7ed8474f1c95b72a"
       url: "https://pub.dev"
     source: hosted
-    version: "3.3.0"
+    version: "4.12.0"
   integration_test:
     dependency: "direct dev"
     description: flutter
@@ -740,6 +732,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "5.6.4"
+  native_toolchain_c:
+    dependency: transitive
+    description:
+      name: native_toolchain_c
+      sha256: f9c168717100ae6d9fee9ffb0be379bf1f8b26b0f6bcbd4fdddcd931993a6a72
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.19.2"
   node_preamble:
     dependency: transitive
     description:
@@ -824,34 +824,34 @@ packages:
     dependency: transitive
     description:
       name: pdfium_dart
-      sha256: "86e95c66b09f3245b95c4924f2edce8d4f7c9786876e5c5ee8e36b104a94bbb0"
+      sha256: e9f712166563540228e9ce7b8a515fcbd42ebd9d7c0925baa42c6b981f7e7900
       url: "https://pub.dev"
     source: hosted
-    version: "0.2.5"
+    version: "0.4.0"
   pdfium_flutter:
     dependency: transitive
     description:
       name: pdfium_flutter
-      sha256: "0b115c0917aef9cf6bb9c4d47d0efc61d97f44844cd76287c921f997c26cf15d"
+      sha256: e2c81c52bc4b44fc096ffae1f891328ccb0956013d7ae92ab29b473a5433cc97
       url: "https://pub.dev"
     source: hosted
-    version: "0.2.3"
+    version: "0.4.0"
   pdfrx:
     dependency: "direct main"
     description:
       name: pdfrx
-      sha256: "4e0efc23547d319ae6089e9593c2c9aca6d858a844eaa7848f95e2c2efea919c"
+      sha256: ef44121dcdf9b59a85a0ea681250865e4971c4e0e218ec38772097167c3d1f4b
       url: "https://pub.dev"
     source: hosted
-    version: "2.4.5"
+    version: "2.9.0"
   pdfrx_engine:
     dependency: transitive
     description:
       name: pdfrx_engine
-      sha256: "80a1facaf8f587fb2592b53d424a6dc61f74e26c009395f8e52da7d3d3b6b1e6"
+      sha256: "7167e28baf8c85650b7118fdbac3fe29eec22f50ff6afaae0e90e8b69c7ab529"
       url: "https://pub.dev"
     source: hosted
-    version: "0.4.4"
+    version: "0.7.4"
   petitparser:
     dependency: transitive
     description:
@@ -884,6 +884,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.5.3"
+  posix:
+    dependency: transitive
+    description:
+      name: posix
+      sha256: bc1bad54ad2b735816e31f8d4600cfde6c7839975085ddfbca48b6c9f7c4044e
+      url: "https://pub.dev"
+    source: hosted
+    version: "6.5.2"
   process:
     dependency: transitive
     description:
@@ -908,14 +916,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.6.0"
-  quiver:
-    dependency: transitive
-    description:
-      name: quiver
-      sha256: ea0b925899e64ecdfbf9c7becb60d5b50e706ade44a85b2363be2a22d88117d2
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.2.2"
   recase:
     dependency: transitive
     description:
@@ -1117,10 +1117,10 @@ packages:
     dependency: "direct main"
     description:
       name: sqlite3_flutter_libs
-      sha256: "3ed7553eee7bb368f8950f58ba29f634e06e813c029aff6a0d60862b96de8454"
+      sha256: eeb9e3a45207649076b808f8a5a74d68770d0b7f26ccef6d5f43106eee5375ad
       url: "https://pub.dev"
     source: hosted
-    version: "0.6.0+eol"
+    version: "0.5.42"
   sqlparser:
     dependency: transitive
     description:
@@ -1386,7 +1386,7 @@ packages:
     source: hosted
     version: "1.1.0"
   xml:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: xml
       sha256: "971043b3a0d3da28727e40ed3e0b5d18b742fa5a68665cca88e74b7876d5e025"

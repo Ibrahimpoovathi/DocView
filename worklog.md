@@ -89,3 +89,63 @@ decisions + why, and open issues. Never backfilled.
 - Phase 1: import pipeline (file_picker + SAF/iOS picker), drift schema v1,
   covers via pdfrx page-1, library UI, FTS5 skeleton. Then Phase 2 PDF reader.
 - Reviewer: install **`releases/DocView.apk`** (0.1.0+1) to sanity-check shell.
+
+## 2026-10-22 — Phase 1 done (0.2.0+2)
+
+**Import + library shipped.** Design system "Bookish warm" locked: Fraunces
+(serif display) + Inter (sans UI) bundled as OFL variable fonts; warm
+paper/sepia surfaces, terracotta primary; full light+dark ColorSchemes in
+`lib/core/theme/app_theme.dart`, tokens in `lib/core/design/dv.dart`.
+
+Data layer (drift, schema v1, copied conventions from pd):
+- Tables: Documents (uuid, format-as-enum, sha256 unique for dedupe, soft
+  delete via deletedAt, coverPath, lastOpenedAt), Collections,
+  DocumentCollections (n:m), Tags, DocumentTags (n:m).
+- `LibraryRepository` (watch filters/sorts, CRUD, soft delete, favourite
+  toggle, collections/tags joins), `ImportService` (sha256 dedupe, sandbox
+  copy `books/<uuid>/orig.<ext>`, unawaited background enrichment),
+  `MetadataService` (PDF page-1 cover render via pdfrx `createImageNF` +
+  JPEG encode; EPUB container→OPF title/author/cover; formats from
+  `DocFormat` magic-sniffing in `lib/core/format/doc_format.dart`).
+
+UI: premium library screen — AppBar with search toggle, filter chips
+(All/Favourites/Recent), continue-reading `ShelfBar`, responsive cover grid
+(phones→tablet column math) or list view, sort menu, staggered entrance
+animation, shimmer `SkeletonDocCard` loading, EmptyState, FAB import, Tools
+drawer; doc options sheet (details edit, collections picker, tags, favourite,
+export copy, confirm delete); reader route stub.
+
+Dependencies churn worth recording:
+- Replaced `epubx` with hand-rolled OPF parsing — it pinned image ^3 which
+  conflicts with pdfrx_engine (needs image 4.x API `ChannelOrder`).
+- archive 3.6.1 → 4.5.2 (image 4.12 needs archive 4).
+- pdfrx 2.4.5 → 2.9.0 / pdfrx_engine 0.7.4: engine 0.4.4 had a null-safety
+  compile error in `pdf_file_cache.dart` under the test VM toolchain.
+- file_picker 13.x: `.platform` accessor is gone; static methods now
+  (`pickFileAndDirectoryPaths` for multi-select, `saveFile` requires bytes,
+  `getDirectoryPath` unchanged).
+- sqlite3_flutter_libs 0.6.0+eol → 0.5.42: the eol build does NOT bundle
+  libsqlite3.so → first AVD run showed a drift dlopen error screen. 0.5.42
+  packages the native libs; verified fixed on AVD.
+- riverpod_generator 4.x cannot codegen function providers returning
+  drift generics (`Stream<List<Document>>`) — InvalidTypeException; those two
+  providers (`libraryDocs`, `continueReading`) are manual `StreamProvider`s,
+  the rest remains codegen.
+- `AppPaths.initForTest()` test hook (path_provider has no plugin in
+  `flutter test`); gradle heap cap unchanged.
+
+Tests: 10/10 (`test/widget_test.dart` empty-library render with overridden
+in-memory db, `test/doc_format_test.dart` extension+magic detection,
+`test/library_data_test.dart` repository CRUD/soft-delete, import dedupe/
+unsupported/bytes). `flutter analyze` 0 issues.
+
+AVD battery (script `avd_check.sh` reworked for serial-targeted adb after
+"more than one device" races; pkill footgun noted: never `pkill -f qemu`
+with an unbracketed pattern — it kills the invoking shell):
+- quick_phone: first run exposed the sqlite dlopen failure (screenshot);
+  after sqlite3_flutter_libs pin: clean empty library, warm theme renders.
+- old_phone (API 30), pixel_7 (API 36), pixel_tablet (landscape): all clean.
+- Releases/DocView.apk refreshed: arm64 0.2.0+2, 29.7 MB.
+
+Next: Phase 2 — PDF reader (pdfrx viewer, TOC, search, fit/dark modes,
+progress persistence), then wire reader nav from library cards.

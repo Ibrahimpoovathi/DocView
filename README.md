@@ -9,15 +9,15 @@ optional user-owned WebDAV sync.
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Scaffold, core stack (riverpod/go_router/drift), 3-app reference study | Done |
-| 1 | Import + library (covers, recents, collections, tags, continue-reading) | Next |
-| 2 | PDF reader (pdfrx: TOC, search, bookmarks, dark/fit modes, progress) | Planned |
+| 1 | Import + library (covers, recents, collections, tags, continue-reading) | Done |
+| 2 | PDF reader (pdfrx: TOC, search, bookmarks, dark/fit modes, progress) | Next |
 | 3 | Reflow readers (foliate-js: EPUB/MOBI/AZW3/FB2/TXT, CBZ pager, themes) | Planned |
 | 4 | Office: DOCX native, XLSX tables, PPTX/DOC/ODT/RTF text-first | Planned |
 | 5 | Search (in-doc + library FTS5), dictionary popup (offline + online) | Planned |
 | 6 | WebDAV sync (books + progress + notes/collections, on-demand download) | Planned |
 | 7 | Polish: big-library perf, tablet 2-pane, notes export, release pipeline | Planned |
 
-Current build: **0.1.0** (Phase 0 shell). See [STUDY.md](STUDY.md) for the
+Current build: **0.2.0** (Phase 0 shell + Phase 1 library). See [STUDY.md](STUDY.md) for the
 reference-app analysis that drove architecture decisions and [worklog.md](worklog.md)
 for the chronological build log.
 
@@ -83,7 +83,7 @@ cd ~/Applications/OpenCode/DocView
 
 ## Release APK (single artifact, rewritten every update)
 
-- Deliverable: **`releases/DocView.apk`** — arm64-only release build (v0.1.0+1 ≈ 23.9 MB),
+- Deliverable: **`releases/DocView.apk`** — arm64-only release build (v0.2.0+2 ≈ 29.7 MB),
   committed to git; regenerated and *overwritten* at the end of every change.
 - Command to reproduce: `~/flutter/bin/flutter build apk --release --split-per-abi`,
   then copy `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` → `releases/DocView.apk`.
@@ -91,20 +91,23 @@ cd ~/Applications/OpenCode/DocView
   (`app-x86_64-release.apk`) — never committed.
 - Version bumps: pubspec `version` + worklog note each update.
 
-### Test results at current build (0.1.0+1)
+### Test results at current build (0.2.0+2)
 
-Rigorous AVD battery (install, cold launch, dark mode toggle, rotation,
-500-event monkey stress, cold restart, FATAL/ANR logcat scan, screenshot review):
+Static: `flutter analyze` — 0 issues; `flutter test` — 10/10 pass
+(format detection, repository CRUD + soft delete, import pipeline incl.
+dedupe-by-sha256 and unsupported-file handling, empty-library widget test).
+
+AVD battery (install, cold launch, screenshot review, FATAL/ANR logcat scan):
 
 | AVD | API | Result |
 |---|---|---|
-| quick_phone (ATD) | 35 | ✅ full battery; cold start 617/462 ms; monkey clean; 0 crashes |
-| old_phone | 30 | ✅ install+launch clean (layout verified via screenshot) |
+| quick_phone (ATD) | 35 | ✅ clean; empty library renders (error screen fixed via sqlite3_flutter_libs) |
+| old_phone | 30 | ✅ clean |
 | pixel_7 | 36 | ✅ clean |
-| pixel_tablet | 36 (landscape) | ✅ clean |
+| pixel_tablet | 36 (landscape) | ✅ clean, layout adapts |
 
-Integration-test harness (`integration_test/app_test.dart`) is in place; see
-worklog for the host-RAM constraint that routes it through the release-battery path today.
+Integration-test harness (`integration_test/app_test.dart`) remains in place;
+execution on emulator still deferred for the host-RAM reason in the worklog.
 
 ## Docs
 
