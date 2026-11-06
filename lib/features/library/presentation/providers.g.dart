@@ -299,3 +299,55 @@ abstract class _$ImportRunner extends $Notifier<String> {
     element.handleCreate(ref, build);
   }
 }
+
+/// Per-document reading positions (upsert store).
+
+@ProviderFor(readingRepository)
+final readingRepositoryProvider = ReadingRepositoryProvider._();
+
+/// Per-document reading positions (upsert store).
+
+final class ReadingRepositoryProvider
+    extends
+        $FunctionalProvider<
+          ReadingRepository,
+          ReadingRepository,
+          ReadingRepository
+        >
+    with $Provider<ReadingRepository> {
+  /// Per-document reading positions (upsert store).
+  ReadingRepositoryProvider._()
+    : super(
+        from: null,
+        argument: null,
+        retry: null,
+        name: r'readingRepositoryProvider',
+        isAutoDispose: false,
+        dependencies: null,
+        $allTransitiveDependencies: null,
+      );
+
+  @override
+  String debugGetCreateSourceHash() => _$readingRepositoryHash();
+
+  @$internal
+  @override
+  $ProviderElement<ReadingRepository> $createElement(
+    $ProviderPointer pointer,
+  ) => $ProviderElement(pointer);
+
+  @override
+  ReadingRepository create(Ref ref) {
+    return readingRepository(ref);
+  }
+
+  /// {@macro riverpod.override_with_value}
+  Override overrideWithValue(ReadingRepository value) {
+    return $ProviderOverride(
+      origin: this,
+      providerOverride: $SyncValueProvider<ReadingRepository>(value),
+    );
+  }
+}
+
+String _$readingRepositoryHash() => r'a27adad65c60146a5047502710ac71ae80b60626';

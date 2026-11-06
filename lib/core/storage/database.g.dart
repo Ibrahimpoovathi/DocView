@@ -1809,6 +1809,390 @@ class DocumentTagsCompanion extends UpdateCompanion<DocumentTag> {
   }
 }
 
+class $ReadingPositionsTable extends ReadingPositions
+    with TableInfo<$ReadingPositionsTable, ReadingPosition> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $ReadingPositionsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _documentIdMeta = const VerificationMeta(
+    'documentId',
+  );
+  @override
+  late final GeneratedColumn<int> documentId = GeneratedColumn<int>(
+    'document_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'UNIQUE REFERENCES documents (id)',
+    ),
+  );
+  static const VerificationMeta _pageNumberMeta = const VerificationMeta(
+    'pageNumber',
+  );
+  @override
+  late final GeneratedColumn<int> pageNumber = GeneratedColumn<int>(
+    'page_number',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  @override
+  late final GeneratedColumnWithTypeConverter<ViewerFitMode, String> fitMode =
+      GeneratedColumn<String>(
+        'fit_mode',
+        aliasedName,
+        false,
+        type: DriftSqlType.string,
+        requiredDuringInsert: true,
+      ).withConverter<ViewerFitMode>($ReadingPositionsTable.$converterfitMode);
+  @override
+  late final GeneratedColumnWithTypeConverter<ViewerColorMode, String>
+  colorMode = GeneratedColumn<String>(
+    'color_mode',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  ).withConverter<ViewerColorMode>($ReadingPositionsTable.$convertercolorMode);
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    clientDefault: () => DateTime.now(),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    documentId,
+    pageNumber,
+    fitMode,
+    colorMode,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'reading_positions';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<ReadingPosition> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('document_id')) {
+      context.handle(
+        _documentIdMeta,
+        documentId.isAcceptableOrUnknown(data['document_id']!, _documentIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_documentIdMeta);
+    }
+    if (data.containsKey('page_number')) {
+      context.handle(
+        _pageNumberMeta,
+        pageNumber.isAcceptableOrUnknown(data['page_number']!, _pageNumberMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_pageNumberMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => const {};
+  @override
+  ReadingPosition map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return ReadingPosition(
+      documentId: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}document_id'],
+      )!,
+      pageNumber: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}page_number'],
+      )!,
+      fitMode: $ReadingPositionsTable.$converterfitMode.fromSql(
+        attachedDatabase.typeMapping.read(
+          DriftSqlType.string,
+          data['${effectivePrefix}fit_mode'],
+        )!,
+      ),
+      colorMode: $ReadingPositionsTable.$convertercolorMode.fromSql(
+        attachedDatabase.typeMapping.read(
+          DriftSqlType.string,
+          data['${effectivePrefix}color_mode'],
+        )!,
+      ),
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $ReadingPositionsTable createAlias(String alias) {
+    return $ReadingPositionsTable(attachedDatabase, alias);
+  }
+
+  static JsonTypeConverter2<ViewerFitMode, String, String> $converterfitMode =
+      const EnumNameConverter<ViewerFitMode>(ViewerFitMode.values);
+  static JsonTypeConverter2<ViewerColorMode, String, String>
+  $convertercolorMode = const EnumNameConverter<ViewerColorMode>(
+    ViewerColorMode.values,
+  );
+}
+
+class ReadingPosition extends DataClass implements Insertable<ReadingPosition> {
+  final int documentId;
+  final int pageNumber;
+  final ViewerFitMode fitMode;
+  final ViewerColorMode colorMode;
+  final DateTime updatedAt;
+  const ReadingPosition({
+    required this.documentId,
+    required this.pageNumber,
+    required this.fitMode,
+    required this.colorMode,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['document_id'] = Variable<int>(documentId);
+    map['page_number'] = Variable<int>(pageNumber);
+    {
+      map['fit_mode'] = Variable<String>(
+        $ReadingPositionsTable.$converterfitMode.toSql(fitMode),
+      );
+    }
+    {
+      map['color_mode'] = Variable<String>(
+        $ReadingPositionsTable.$convertercolorMode.toSql(colorMode),
+      );
+    }
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  ReadingPositionsCompanion toCompanion(bool nullToAbsent) {
+    return ReadingPositionsCompanion(
+      documentId: Value(documentId),
+      pageNumber: Value(pageNumber),
+      fitMode: Value(fitMode),
+      colorMode: Value(colorMode),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory ReadingPosition.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return ReadingPosition(
+      documentId: serializer.fromJson<int>(json['documentId']),
+      pageNumber: serializer.fromJson<int>(json['pageNumber']),
+      fitMode: $ReadingPositionsTable.$converterfitMode.fromJson(
+        serializer.fromJson<String>(json['fitMode']),
+      ),
+      colorMode: $ReadingPositionsTable.$convertercolorMode.fromJson(
+        serializer.fromJson<String>(json['colorMode']),
+      ),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'documentId': serializer.toJson<int>(documentId),
+      'pageNumber': serializer.toJson<int>(pageNumber),
+      'fitMode': serializer.toJson<String>(
+        $ReadingPositionsTable.$converterfitMode.toJson(fitMode),
+      ),
+      'colorMode': serializer.toJson<String>(
+        $ReadingPositionsTable.$convertercolorMode.toJson(colorMode),
+      ),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  ReadingPosition copyWith({
+    int? documentId,
+    int? pageNumber,
+    ViewerFitMode? fitMode,
+    ViewerColorMode? colorMode,
+    DateTime? updatedAt,
+  }) => ReadingPosition(
+    documentId: documentId ?? this.documentId,
+    pageNumber: pageNumber ?? this.pageNumber,
+    fitMode: fitMode ?? this.fitMode,
+    colorMode: colorMode ?? this.colorMode,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  ReadingPosition copyWithCompanion(ReadingPositionsCompanion data) {
+    return ReadingPosition(
+      documentId: data.documentId.present
+          ? data.documentId.value
+          : this.documentId,
+      pageNumber: data.pageNumber.present
+          ? data.pageNumber.value
+          : this.pageNumber,
+      fitMode: data.fitMode.present ? data.fitMode.value : this.fitMode,
+      colorMode: data.colorMode.present ? data.colorMode.value : this.colorMode,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ReadingPosition(')
+          ..write('documentId: $documentId, ')
+          ..write('pageNumber: $pageNumber, ')
+          ..write('fitMode: $fitMode, ')
+          ..write('colorMode: $colorMode, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(documentId, pageNumber, fitMode, colorMode, updatedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ReadingPosition &&
+          other.documentId == this.documentId &&
+          other.pageNumber == this.pageNumber &&
+          other.fitMode == this.fitMode &&
+          other.colorMode == this.colorMode &&
+          other.updatedAt == this.updatedAt);
+}
+
+class ReadingPositionsCompanion extends UpdateCompanion<ReadingPosition> {
+  final Value<int> documentId;
+  final Value<int> pageNumber;
+  final Value<ViewerFitMode> fitMode;
+  final Value<ViewerColorMode> colorMode;
+  final Value<DateTime> updatedAt;
+  final Value<int> rowid;
+  const ReadingPositionsCompanion({
+    this.documentId = const Value.absent(),
+    this.pageNumber = const Value.absent(),
+    this.fitMode = const Value.absent(),
+    this.colorMode = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  ReadingPositionsCompanion.insert({
+    required int documentId,
+    required int pageNumber,
+    required ViewerFitMode fitMode,
+    required ViewerColorMode colorMode,
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : documentId = Value(documentId),
+       pageNumber = Value(pageNumber),
+       fitMode = Value(fitMode),
+       colorMode = Value(colorMode);
+  static Insertable<ReadingPosition> custom({
+    Expression<int>? documentId,
+    Expression<int>? pageNumber,
+    Expression<String>? fitMode,
+    Expression<String>? colorMode,
+    Expression<DateTime>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (documentId != null) 'document_id': documentId,
+      if (pageNumber != null) 'page_number': pageNumber,
+      if (fitMode != null) 'fit_mode': fitMode,
+      if (colorMode != null) 'color_mode': colorMode,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  ReadingPositionsCompanion copyWith({
+    Value<int>? documentId,
+    Value<int>? pageNumber,
+    Value<ViewerFitMode>? fitMode,
+    Value<ViewerColorMode>? colorMode,
+    Value<DateTime>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return ReadingPositionsCompanion(
+      documentId: documentId ?? this.documentId,
+      pageNumber: pageNumber ?? this.pageNumber,
+      fitMode: fitMode ?? this.fitMode,
+      colorMode: colorMode ?? this.colorMode,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (documentId.present) {
+      map['document_id'] = Variable<int>(documentId.value);
+    }
+    if (pageNumber.present) {
+      map['page_number'] = Variable<int>(pageNumber.value);
+    }
+    if (fitMode.present) {
+      map['fit_mode'] = Variable<String>(
+        $ReadingPositionsTable.$converterfitMode.toSql(fitMode.value),
+      );
+    }
+    if (colorMode.present) {
+      map['color_mode'] = Variable<String>(
+        $ReadingPositionsTable.$convertercolorMode.toSql(colorMode.value),
+      );
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ReadingPositionsCompanion(')
+          ..write('documentId: $documentId, ')
+          ..write('pageNumber: $pageNumber, ')
+          ..write('fitMode: $fitMode, ')
+          ..write('colorMode: $colorMode, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -1818,6 +2202,9 @@ abstract class _$AppDatabase extends GeneratedDatabase {
       $DocumentCollectionsTable(this);
   late final $TagsTable tags = $TagsTable(this);
   late final $DocumentTagsTable documentTags = $DocumentTagsTable(this);
+  late final $ReadingPositionsTable readingPositions = $ReadingPositionsTable(
+    this,
+  );
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -1828,6 +2215,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     documentCollections,
     tags,
     documentTags,
+    readingPositions,
   ];
 }
 
@@ -1915,6 +2303,29 @@ final class $$DocumentsTableReferences
     ).filter((f) => f.documentId.id.sqlEquals($_itemColumn<int>('id')!));
 
     final cache = $_typedResult.readTableOrNull(_documentTagsRefsTable($_db));
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
+
+  static MultiTypedResultKey<$ReadingPositionsTable, List<ReadingPosition>>
+  _readingPositionsRefsTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
+    db.readingPositions,
+    aliasName: $_aliasNameGenerator(
+      db.documents.id,
+      db.readingPositions.documentId,
+    ),
+  );
+
+  $$ReadingPositionsTableProcessedTableManager get readingPositionsRefs {
+    final manager = $$ReadingPositionsTableTableManager(
+      $_db,
+      $_db.readingPositions,
+    ).filter((f) => f.documentId.id.sqlEquals($_itemColumn<int>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(
+      _readingPositionsRefsTable($_db),
+    );
     return ProcessedTableManager(
       manager.$state.copyWith(prefetchedData: cache),
     );
@@ -2047,6 +2458,31 @@ class $$DocumentsTableFilterComposer
           }) => $$DocumentTagsTableFilterComposer(
             $db: $db,
             $table: $db.documentTags,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+
+  Expression<bool> readingPositionsRefs(
+    Expression<bool> Function($$ReadingPositionsTableFilterComposer f) f,
+  ) {
+    final $$ReadingPositionsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.readingPositions,
+      getReferencedColumn: (t) => t.documentId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$ReadingPositionsTableFilterComposer(
+            $db: $db,
+            $table: $db.readingPositions,
             $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
             joinBuilder: joinBuilder,
             $removeJoinBuilderFromRootComposer:
@@ -2254,6 +2690,31 @@ class $$DocumentsTableAnnotationComposer
     );
     return f(composer);
   }
+
+  Expression<T> readingPositionsRefs<T extends Object>(
+    Expression<T> Function($$ReadingPositionsTableAnnotationComposer a) f,
+  ) {
+    final $$ReadingPositionsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.readingPositions,
+      getReferencedColumn: (t) => t.documentId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$ReadingPositionsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.readingPositions,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
 }
 
 class $$DocumentsTableTableManager
@@ -2272,6 +2733,7 @@ class $$DocumentsTableTableManager
           PrefetchHooks Function({
             bool documentCollectionsRefs,
             bool documentTagsRefs,
+            bool readingPositionsRefs,
           })
         > {
   $$DocumentsTableTableManager(_$AppDatabase db, $DocumentsTable table)
@@ -2362,12 +2824,17 @@ class $$DocumentsTableTableManager
               )
               .toList(),
           prefetchHooksCallback:
-              ({documentCollectionsRefs = false, documentTagsRefs = false}) {
+              ({
+                documentCollectionsRefs = false,
+                documentTagsRefs = false,
+                readingPositionsRefs = false,
+              }) {
                 return PrefetchHooks(
                   db: db,
                   explicitlyWatchedTables: [
                     if (documentCollectionsRefs) db.documentCollections,
                     if (documentTagsRefs) db.documentTags,
+                    if (readingPositionsRefs) db.readingPositions,
                   ],
                   addJoins: null,
                   getPrefetchedDataCallback: (items) async {
@@ -2414,6 +2881,27 @@ class $$DocumentsTableTableManager
                               ),
                           typedResults: items,
                         ),
+                      if (readingPositionsRefs)
+                        await $_getPrefetchedData<
+                          Document,
+                          $DocumentsTable,
+                          ReadingPosition
+                        >(
+                          currentTable: table,
+                          referencedTable: $$DocumentsTableReferences
+                              ._readingPositionsRefsTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$DocumentsTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).readingPositionsRefs,
+                          referencedItemsForCurrentItem:
+                              (item, referencedItems) => referencedItems.where(
+                                (e) => e.documentId == item.id,
+                              ),
+                          typedResults: items,
+                        ),
                     ];
                   },
                 );
@@ -2437,6 +2925,7 @@ typedef $$DocumentsTableProcessedTableManager =
       PrefetchHooks Function({
         bool documentCollectionsRefs,
         bool documentTagsRefs,
+        bool readingPositionsRefs,
       })
     >;
 typedef $$CollectionsTableCreateCompanionBuilder =
@@ -3677,6 +4166,338 @@ typedef $$DocumentTagsTableProcessedTableManager =
       DocumentTag,
       PrefetchHooks Function({bool documentId, bool tagId})
     >;
+typedef $$ReadingPositionsTableCreateCompanionBuilder =
+    ReadingPositionsCompanion Function({
+      required int documentId,
+      required int pageNumber,
+      required ViewerFitMode fitMode,
+      required ViewerColorMode colorMode,
+      Value<DateTime> updatedAt,
+      Value<int> rowid,
+    });
+typedef $$ReadingPositionsTableUpdateCompanionBuilder =
+    ReadingPositionsCompanion Function({
+      Value<int> documentId,
+      Value<int> pageNumber,
+      Value<ViewerFitMode> fitMode,
+      Value<ViewerColorMode> colorMode,
+      Value<DateTime> updatedAt,
+      Value<int> rowid,
+    });
+
+final class $$ReadingPositionsTableReferences
+    extends
+        BaseReferences<_$AppDatabase, $ReadingPositionsTable, ReadingPosition> {
+  $$ReadingPositionsTableReferences(
+    super.$_db,
+    super.$_table,
+    super.$_typedResult,
+  );
+
+  static $DocumentsTable _documentIdTable(_$AppDatabase db) =>
+      db.documents.createAlias(
+        $_aliasNameGenerator(db.readingPositions.documentId, db.documents.id),
+      );
+
+  $$DocumentsTableProcessedTableManager get documentId {
+    final $_column = $_itemColumn<int>('document_id')!;
+
+    final manager = $$DocumentsTableTableManager(
+      $_db,
+      $_db.documents,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_documentIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+}
+
+class $$ReadingPositionsTableFilterComposer
+    extends Composer<_$AppDatabase, $ReadingPositionsTable> {
+  $$ReadingPositionsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get pageNumber => $composableBuilder(
+    column: $table.pageNumber,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnWithTypeConverterFilters<ViewerFitMode, ViewerFitMode, String>
+  get fitMode => $composableBuilder(
+    column: $table.fitMode,
+    builder: (column) => ColumnWithTypeConverterFilters(column),
+  );
+
+  ColumnWithTypeConverterFilters<ViewerColorMode, ViewerColorMode, String>
+  get colorMode => $composableBuilder(
+    column: $table.colorMode,
+    builder: (column) => ColumnWithTypeConverterFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  $$DocumentsTableFilterComposer get documentId {
+    final $$DocumentsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.documentId,
+      referencedTable: $db.documents,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$DocumentsTableFilterComposer(
+            $db: $db,
+            $table: $db.documents,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$ReadingPositionsTableOrderingComposer
+    extends Composer<_$AppDatabase, $ReadingPositionsTable> {
+  $$ReadingPositionsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get pageNumber => $composableBuilder(
+    column: $table.pageNumber,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get fitMode => $composableBuilder(
+    column: $table.fitMode,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get colorMode => $composableBuilder(
+    column: $table.colorMode,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  $$DocumentsTableOrderingComposer get documentId {
+    final $$DocumentsTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.documentId,
+      referencedTable: $db.documents,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$DocumentsTableOrderingComposer(
+            $db: $db,
+            $table: $db.documents,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$ReadingPositionsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $ReadingPositionsTable> {
+  $$ReadingPositionsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get pageNumber => $composableBuilder(
+    column: $table.pageNumber,
+    builder: (column) => column,
+  );
+
+  GeneratedColumnWithTypeConverter<ViewerFitMode, String> get fitMode =>
+      $composableBuilder(column: $table.fitMode, builder: (column) => column);
+
+  GeneratedColumnWithTypeConverter<ViewerColorMode, String> get colorMode =>
+      $composableBuilder(column: $table.colorMode, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  $$DocumentsTableAnnotationComposer get documentId {
+    final $$DocumentsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.documentId,
+      referencedTable: $db.documents,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$DocumentsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.documents,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$ReadingPositionsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $ReadingPositionsTable,
+          ReadingPosition,
+          $$ReadingPositionsTableFilterComposer,
+          $$ReadingPositionsTableOrderingComposer,
+          $$ReadingPositionsTableAnnotationComposer,
+          $$ReadingPositionsTableCreateCompanionBuilder,
+          $$ReadingPositionsTableUpdateCompanionBuilder,
+          (ReadingPosition, $$ReadingPositionsTableReferences),
+          ReadingPosition,
+          PrefetchHooks Function({bool documentId})
+        > {
+  $$ReadingPositionsTableTableManager(
+    _$AppDatabase db,
+    $ReadingPositionsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$ReadingPositionsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$ReadingPositionsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$ReadingPositionsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<int> documentId = const Value.absent(),
+                Value<int> pageNumber = const Value.absent(),
+                Value<ViewerFitMode> fitMode = const Value.absent(),
+                Value<ViewerColorMode> colorMode = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => ReadingPositionsCompanion(
+                documentId: documentId,
+                pageNumber: pageNumber,
+                fitMode: fitMode,
+                colorMode: colorMode,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required int documentId,
+                required int pageNumber,
+                required ViewerFitMode fitMode,
+                required ViewerColorMode colorMode,
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => ReadingPositionsCompanion.insert(
+                documentId: documentId,
+                pageNumber: pageNumber,
+                fitMode: fitMode,
+                colorMode: colorMode,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable(table),
+                  $$ReadingPositionsTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: ({documentId = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [],
+              addJoins:
+                  <
+                    T extends TableManagerState<
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic
+                    >
+                  >(state) {
+                    if (documentId) {
+                      state =
+                          state.withJoin(
+                                currentTable: table,
+                                currentColumn: table.documentId,
+                                referencedTable:
+                                    $$ReadingPositionsTableReferences
+                                        ._documentIdTable(db),
+                                referencedColumn:
+                                    $$ReadingPositionsTableReferences
+                                        ._documentIdTable(db)
+                                        .id,
+                              )
+                              as T;
+                    }
+
+                    return state;
+                  },
+              getPrefetchedDataCallback: (items) async {
+                return [];
+              },
+            );
+          },
+        ),
+      );
+}
+
+typedef $$ReadingPositionsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $ReadingPositionsTable,
+      ReadingPosition,
+      $$ReadingPositionsTableFilterComposer,
+      $$ReadingPositionsTableOrderingComposer,
+      $$ReadingPositionsTableAnnotationComposer,
+      $$ReadingPositionsTableCreateCompanionBuilder,
+      $$ReadingPositionsTableUpdateCompanionBuilder,
+      (ReadingPosition, $$ReadingPositionsTableReferences),
+      ReadingPosition,
+      PrefetchHooks Function({bool documentId})
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -3690,4 +4511,6 @@ class $AppDatabaseManager {
   $$TagsTableTableManager get tags => $$TagsTableTableManager(_db, _db.tags);
   $$DocumentTagsTableTableManager get documentTags =>
       $$DocumentTagsTableTableManager(_db, _db.documentTags);
+  $$ReadingPositionsTableTableManager get readingPositions =>
+      $$ReadingPositionsTableTableManager(_db, _db.readingPositions);
 }

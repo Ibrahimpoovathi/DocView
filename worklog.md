@@ -149,3 +149,44 @@ with an unbracketed pattern — it kills the invoking shell):
 
 Next: Phase 2 — PDF reader (pdfrx viewer, TOC, search, fit/dark modes,
 progress persistence), then wire reader nav from library cards.
+
+## 2026-11-06 — Phase 2 done (0.3.0+3)
+
+**PDF reader shipped** (pdfrx 2.9.0 / engine 0.7.4):
+- **Schema v1→v2**: new `ReadingPositions` table (documentId unique FK,
+  pageNumber, fitMode + colorMode textEnums, updatedAt). MigrationStrategy
+  `onUpgrade` adds the table for existing installs.
+- `ReadingRepository` (`features/reader/data/reading_repository.dart`): ensure()
+  seeds the row on first open, savePage/savePrefs upsert via read-then-write
+  (table has no PK; drift DoUpdate needs an explicit target — read-then-write
+  is simpler and partial-safe). Update writes only provided columns.
+- `ReaderScreen` rebuild (`presentation/reader_screen.dart`):
+  - boot resolves doc + saved position, marks `openedAt`, then mounts
+    `PdfViewer.file` with `initialPageNumber` (no remount guesses)
+  - progress save: debounced 600 ms on page change, flushed on dispose +
+    `didChangeAppLifecycleState(paused)`
+  - bottom bar: outline, search, color-cycle (normal→sepia→dark), page slider
+    `n / total`; color modes driven by `PdfViewerParams.pageImageColorFilter`
+    (invert matrix for dark, sepia matrix for sepia — page bitmaps only,
+    overlays/UI stay clean)
+  - in-document search: `PdfTextSearcher` over `PdfViewerController` —
+    live match counter `idx/total`, prev/next, reset on close
+  - outline sheet: `controller.useDocument((d) => d.loadOutline())`, flattened
+    with indent + `goToPage(dest.pageNumber)`; snackbar when empty
+  - non-PDF formats show "reflow lands in Phase 3" notice screen (EPUB etc.
+    wired properly in Phase 3)
+- **Battery hook system**: `--dart-define=DOCVIEW_BATTERY=true` adds a
+  `/reader-debug/raw` route + library auto-seed that imports a bundled
+  hand-crafted `assets/battery/mini.pdf` (valid 1-page PDF built by script
+  during P2 setup) through the REAL pipeline (importBytes → sandbox copy →
+  library row) and deep-opens the reader automatically. Shipped APK contains
+  none of this. Verified render on all 4 AVDs (quick_phone/old_phone/pixel_7/
+  pixel_tablet — incl. portrait and landscape), 0 FATAL exceptions in
+  every logcat scan.
+- Tests: reading_repository_test (4 cases) + all prior suites → 14/14;
+  analyze clean. Note: drift data classes still force manual riverpod
+  providers for typed generics (docByIdProvider added the same way).
+- Releases/DocView.apk rebuilt: arm64 0.3.0+3 ≈ 30.6 MB.
+
+Next: Phase 3 — reflow readers (foliate-js EPUB/MOBI/AZW3/FB2/TXT + CBZ
+pager), reader routing per format, shared reader theming.

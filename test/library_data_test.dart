@@ -7,7 +7,6 @@ import 'package:docview/core/storage/database.dart';
 import 'package:docview/features/library/data/library_repository.dart';
 import 'package:docview/features/library/domain/library_query.dart';
 import 'package:docview/features/library/data/import_service.dart';
-import 'package:docview/features/library/data/metadata_service.dart';
 import 'package:docview/features/library/presentation/providers.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';

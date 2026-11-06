@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../../core/storage/database.dart';
+import '../../reader/data/reading_repository.dart';
 import '../data/import_service.dart';
 import '../data/library_repository.dart';
 import '../data/metadata_service.dart';
@@ -99,3 +100,8 @@ class ImportRunner extends _$ImportRunner {
 
   static const importing = 'importing';
 }
+
+/// Per-document reading positions (upsert store).
+@Riverpod(keepAlive: true)
+ReadingRepository readingRepository(Ref ref) =>
+    ReadingRepository(ref.watch(appDatabaseProvider));

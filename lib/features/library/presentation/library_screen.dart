@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart' as fp;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../app/router.dart';
 import '../../../core/design/dv.dart';
 import '../../../core/design/widgets/doc_card.dart';
 import '../../../core/design/widgets/empty_state.dart';
@@ -12,6 +15,7 @@ import '../../../core/design/widgets/shelf_bar.dart';
 import '../../../core/design/widgets/skeleton.dart';
 import '../../../core/storage/database.dart';
 import '../domain/library_query.dart';
+import '../data/import_service.dart';
 import 'doc_options_sheet.dart';
 import 'providers.dart';
 
@@ -25,6 +29,30 @@ class LibraryScreen extends ConsumerStatefulWidget {
 class _LibraryScreenState extends ConsumerState<LibraryScreen> {
   final _searchCtrl = TextEditingController();
   bool _searchOpen = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (batteryHook) unawaited(_batterySeed());
+  }
+
+  /// Battery hook (debug-define builds only): import the bundled mini PDF
+  /// through the real pipeline and deep-open its reader.
+  Future<void> _batterySeed() async {
+    final data = await rootBundle.load('assets/battery/mini.pdf');
+    final summary =
+        await ref.read(importServiceProvider).importBytes(
+              {'mini.pdf': data.buffer.asUint8List()},
+            );
+    if (summary.added != 1) return;
+    final docs = await ref
+        .read(libraryRepositoryProvider)
+        .watchLibrary(const LibraryQuery())
+        .first;
+    final doc = docs.isEmpty ? null : docs.first;
+    if (!mounted || doc == null) return;
+    await context.push('/reader/${doc.id}');
+  }
 
   @override
   void dispose() {

@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 
 import '../../core/format/doc_format.dart';
+import '../../features/reader/domain/viewer_prefs.dart';
 
 part 'database.g.dart';
 
@@ -63,14 +64,36 @@ class DocumentTags extends Table {
   Set<Column> get primaryKey => {documentId, tagId};
 }
 
+/// One row per document: reading position + viewer presentation prefs.
+class ReadingPositions extends Table {
+  IntColumn get documentId => integer().unique().references(Documents, #id)();
+  IntColumn get pageNumber => integer()();
+
+  TextColumn get fitMode => textEnum<ViewerFitMode>()();
+  TextColumn get colorMode => textEnum<ViewerColorMode>()();
+  DateTimeColumn get updatedAt => dateTime().clientDefault(() => DateTime.now())();
+}
+
 // ---------------------------------------------------------------------------
 // Database
 // ---------------------------------------------------------------------------
 
-@DriftDatabase(tables: [Documents, Collections, DocumentCollections, Tags, DocumentTags])
+@DriftDatabase(tables: [
+  Documents, Collections, DocumentCollections, Tags, DocumentTags, ReadingPositions,
+])
 class AppDatabase extends _$AppDatabase {
   AppDatabase(super.e);
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+        onCreate: (m) => m.createAll(),
+        onUpgrade: (m, from, to) async {
+          if (from < 2) {
+            await m.createTable(readingPositions);
+          }
+        },
+      );
 }
