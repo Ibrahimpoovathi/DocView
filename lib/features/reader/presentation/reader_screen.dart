@@ -11,6 +11,7 @@ import '../../../core/format/doc_format.dart';
 import '../../../core/storage/database.dart';
 import '../../library/presentation/providers.dart';
 import '../domain/viewer_prefs.dart';
+import 'reflow_screen.dart';
 
 /// Manual (not codegen): drift data-class generics break riverpod_generator.
 final docByIdProvider = FutureProvider.family<Document?, int>(
@@ -169,11 +170,14 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
 
     final doc = _doc!;
     if (doc.format != DocFormat.pdf) {
+      if (reflowFormats.contains(doc.format)) {
+        return ReflowScreen(doc: doc);
+      }
       return _ReaderScaffold(
         child: EmptyState(
           icon: Icons.auto_stories_rounded,
           heading: '"${doc.title}"',
-          body: 'Reflow reading for this format lands in Phase 3.',
+          body: 'This format is not supported yet.',
           actionLabel: 'Back',
           onAction: () => context.pop(),
         ),

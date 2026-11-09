@@ -1,13 +1,17 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:archive/archive.dart';
 import 'package:file_picker/file_picker.dart' as fp;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
+
 import '../../../app/router.dart';
+import '../../../core/format/doc_format.dart';
 import '../../../core/design/dv.dart';
 import '../../../core/design/widgets/doc_card.dart';
 import '../../../core/design/widgets/empty_state.dart';
@@ -37,21 +41,112 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
   }
 
   /// Battery hook (debug-define builds only): import the bundled mini PDF
-  /// through the real pipeline and deep-open its reader.
+  /// plus a generated EPUB and TXT through the real pipeline and deep-open
+  /// the EPUB's reader.
   Future<void> _batterySeed() async {
     final data = await rootBundle.load('assets/battery/mini.pdf');
-    final summary =
-        await ref.read(importServiceProvider).importBytes(
-              {'mini.pdf': data.buffer.asUint8List()},
-            );
-    if (summary.added != 1) return;
+    final summary = await ref.read(importServiceProvider).importBytes(
+          {
+            'mini.pdf': data.buffer.asUint8List(),
+            'battery.epub': _makeEpub(),
+            'battery.txt': _makeTxt(),
+          },
+        );
+    if (summary.added < 1) return;
     final docs = await ref
         .read(libraryRepositoryProvider)
         .watchLibrary(const LibraryQuery())
         .first;
-    final doc = docs.isEmpty ? null : docs.first;
+    Document? doc;
+    for (final d in docs) {
+      if (d.format == DocFormat.epub) {
+        doc = d;
+        break;
+      }
+    }
+    doc ??= docs.isNotEmpty ? docs.first : null;
     if (!mounted || doc == null) return;
     await context.push('/reader/${doc.id}');
+  }
+
+  /// Minimal three-chapter EPUB, built in memory with the archive package.
+  Uint8List _makeEpub() {
+      final archive = Archive();
+
+    ArchiveFile utf8File(String name, String content,
+            {CompressionType compression = CompressionType.deflate}) =>
+        ArchiveFile.bytes(name, utf8.encode(content))..compression = compression;
+
+    archive.addFile(utf8File('mimetype', 'application/epub+zip',
+        compression: CompressionType.none));
+    archive.addFile(utf8File(
+        'META-INF/container.xml',
+        '''<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+</container>'''));
+
+    const chapterNames = ['Wind', 'Harbor', 'Dawn'];
+    final manifest = StringBuffer('<item id="nav" properties="nav" '
+        'href="nav.xhtml" media-type="application/xhtml+xml"/>');
+    final navItems = StringBuffer();
+    var chapterIndex = 1;
+    for (final name in chapterNames) {
+      final body = StringBuffer('<h1>Chapter $name</h1>');
+      for (var i = 1; i <= 25; i++) {
+        body.write('<p>Paragraph $i of $name. The quick brown fox jumps '
+            'over the lazy dog while the calm river folds its silver ribbons '
+            'toward the open sea, and every lamp in the harbor keeps a '
+            'patient watch until dawn arrives at the break of the tide.</p>');
+      }
+      final xhtml = '<html xmlns="http://www.w3.org/1999/xhtml"><head>'
+          '<title>$name</title></head><body>$body</body></html>';
+      archive.addFile(utf8File('OEBPS/ch$chapterIndex.xhtml', xhtml));
+      manifest.write('<item id="c$chapterIndex" href="ch$chapterIndex.xhtml" '
+          'media-type="application/xhtml+xml"/>');
+      navItems.write('<li><a href="ch$chapterIndex.xhtml">Chapter $name</a></li>');
+      chapterIndex++;
+    }
+
+    archive.addFile(utf8File(
+        'OEBPS/nav.xhtml',
+        '<html xmlns="http://www.w3.org/1999/xhtml" '
+        'xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Nav</title>'
+        '</head><body><nav epub:type="toc"><ol>$navItems</ol></nav>'
+        '</body></html>'));
+    archive.addFile(utf8File(
+        'OEBPS/content.opf',
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<package version="3.0" unique-identifier="uid" '
+        'xmlns="http://www.idpf.org/2007/opf">'
+        '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
+        '<dc:title>Battery EPUB</dc:title>'
+        '<dc:language>en</dc:language>'
+        '<dc:identifier id="uid">urn:uuid:docview-battery-epub</dc:identifier>'
+        '<meta property="dcterms:modified">2026-11-06T00:00:00Z</meta>'
+        '</metadata>'
+        '<manifest>$manifest</manifest>'
+        '<spine><itemref idref="c1"/>'
+        '<itemref idref="c2"/><itemref idref="c3"/></spine>'
+        '</package>'));
+
+    return Uint8List.fromList(ZipEncoder().encode(archive));
+  }
+
+  /// A long plain-text document (goes through the TXT→EPUB conversion).
+  Uint8List _makeTxt() {
+    final buf = StringBuffer();
+    for (var ch = 1; ch <= 5; ch++) {
+      buf.writeln('Chapter $ch');
+      buf.writeln();
+      for (var i = 1; i <= 40; i++) {
+        buf.writeln('Paragraph $i. Salt air settles on the old breakwater '
+            'and the tide keeps its own account of everything that drifts '
+            'out with the evening star.');
+      }
+      buf.writeln();
+    }
+    return Uint8List.fromList(utf8.encode(buf.toString()));
   }
 
   @override

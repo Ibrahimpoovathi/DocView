@@ -11,13 +11,14 @@ optional user-owned WebDAV sync.
 | 0 | Scaffold, core stack (riverpod/go_router/drift), 3-app reference study | Done |
 | 1 | Import + library (covers, recents, collections, tags, continue-reading) | Done |
 | 2 | PDF reader (pdfrx: TOC, search, bookmarks, dark/fit modes, progress) | Done |
-| 3 | Reflow readers (foliate-js: EPUB/MOBI/AZW3/FB2/TXT, CBZ pager, themes) | Next |
+| 3 | Reflow readers (foliate-js: EPUB/MOBI/AZW3/FB2/TXT, CBZ pager, themes) | Done |
 | 4 | Office: DOCX native, XLSX tables, PPTX/DOC/ODT/RTF text-first | Planned |
 | 5 | Search (in-doc + library FTS5), dictionary popup (offline + online) | Planned |
 | 6 | WebDAV sync (books + progress + notes/collections, on-demand download) | Planned |
 | 7 | Polish: big-library perf, tablet 2-pane, notes export, release pipeline | Planned |
 
-Current build: **0.3.0** (Phases 0–2: shell, library, PDF reader). See [STUDY.md](STUDY.md) for the
+Current build: **0.4.0** (Phases 0–3: shell, library, PDF reader, reflow
+readers). See [STUDY.md](STUDY.md) for the
 reference-app analysis that drove architecture decisions and [worklog.md](worklog.md)
 for the chronological build log.
 
@@ -83,7 +84,7 @@ cd ~/Applications/OpenCode/DocView
 
 ## Release APK (single artifact, rewritten every update)
 
-- Deliverable: **`releases/DocView.apk`** — arm64-only release build (v0.3.0+3 ≈ 30.6 MB),
+- Deliverable: **`releases/DocView.apk`** — arm64-only release build (v0.4.0+4 ≈ 31.5 MB),
   committed to git; regenerated and *overwritten* at the end of every change.
 - Command to reproduce: `~/flutter/bin/flutter build apk --release --split-per-abi`,
   then copy `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` → `releases/DocView.apk`.
@@ -91,26 +92,36 @@ cd ~/Applications/OpenCode/DocView
   (`app-x86_64-release.apk`) — never committed.
 - Version bumps: pubspec `version` + worklog note each update.
 
-### Test results at current build (0.3.0+3)
+### Test results at current build (0.4.0+4)
 
-Static: `flutter analyze` — 0 issues; `flutter test` — 14/14 pass
-(format detection, repository CRUD + soft delete, import pipeline incl.
-dedupe-by-sha256, reading-position upsert store, empty-library widget test).
+Static: `flutter analyze` — 0 issues; `flutter test` — 17/17 pass
+(format detection, repository CRUD + soft delete + reflow saveProgress,
+import pipeline incl. dedupe-by-sha256, TXT→EPUB converter, empty-library
+widget test).
 
-AVD battery (install, cold launch, screenshot review, FATAL/ANR logcat scan):
+AVD battery (install, cold launch, screenshot review, FATAL/ANR logcat scan;
+run via `tool/battery_all.sh` → per-AVD `tool/battery_one.sh <avd>`):
 
 | AVD | API | Result |
 |---|---|---|
-| quick_phone (ATD) | 35 | ✅ auto-opened battery PDF renders in reader; 0 FATALs |
-| old_phone | 30 | ✅ reader renders clean |
-| pixel_7 | 36 | ✅ reader renders clean |
-| pixel_tablet | 36 (landscape) | ✅ reader renders clean |
+| quick_phone | 36 | ✅ battery EPUB renders (ATD API 35 image never painted WebView — swapped to google_apis) |
+| old_phone | 30 | ✅ graceful "reader error" screen (WebView 83 < foliate-js minimum 84; no FATALs) |
+| pixel_7 | 36 | ✅ EPUB renders, progress slider works, resume round-trip verified |
+| pixel_tablet | 36 (landscape) | ✅ EPUB 2-column spread renders |
 
 Battery build (`--dart-define=DOCVIEW_BATTERY=true`) auto-imports a bundled
-`assets/battery/mini.pdf` through the real pipeline (asset → importBytes →
-sandbox copy → library row → deep-open reader); the shipped APK never contains
-the hook. Screenshots verified per AVD — PdfViewer page, bottom bar (outline /
-search / color cycle / slider) all functional.
+`assets/battery/mini.pdf` plus in-memory `battery.epub` / `battery.txt`
+through the real pipeline (asset → importBytes → sandbox copy → library row
+→ deep-open reader); the shipped APK never contains the hook. Page-turn
+swipe + force-stop/relaunch resume captured per AVD
+(`<avd>.png` / `<avd>.turn.png` / `<avd>.resume.png`).
+
+**Android runtime notes**: manifest adds `INTERNET` (loopback BookServer
+socket) + `usesCleartextTraffic` (loopback http) and disables Impeller for
+this app (`EnableImpeller=false` — compositing of the WebView platform view
+under Impeller never painted; pure-Flutter UI was unaffected). foliate-js
+assets are vendored under `assets/foliate/ext/` (`vendor/` is excluded by
+the Flutter bundler; pubspec lists both asset dirs explicitly).
 
 Integration-test harness (`integration_test/app_test.dart`) remains in place;
 execution on emulator still deferred for the host-RAM reason in the worklog.

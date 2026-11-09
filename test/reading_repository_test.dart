@@ -46,6 +46,21 @@ void main() {
     expect((await repo.forDoc(1))!.colorMode, ViewerColorMode.sepia);
   });
 
+  test('saveProgress stores reflow fraction and CFI location', () async {
+    await repo.ensure(5);
+    await repo.saveProgress(5, 0.42, 'epubcfi(/6/4!W1S2)');
+    final pos = await repo.forDoc(5);
+    expect(pos!.progress, closeTo(0.42, 1e-9));
+    expect(pos.location, 'epubcfi(/6/4!W1S2)');
+
+    // later relocation replaces the values but keeps defaults intact
+    await repo.saveProgress(5, 0.9, null);
+    final pos2 = await repo.forDoc(5);
+    expect(pos2!.progress, closeTo(0.9, 1e-9));
+    expect(pos2.pageNumber, 1);
+    expect(pos2.colorMode, ViewerColorMode.normal);
+  });
+
   test('forDoc returns null for unknown doc', () async {
     expect(await repo.forDoc(99), isNull);
   });

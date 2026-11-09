@@ -190,3 +190,98 @@ progress persistence), then wire reader nav from library cards.
 
 Next: Phase 3 — reflow readers (foliate-js EPUB/MOBI/AZW3/FB2/TXT + CBZ
 pager), reader routing per format, shared reader theming.
+
+## 2026-11-08 — Phase 3 done (0.4.0+4)
+
+**Reflow readers shipped** (foliate-js EPUB/TXT via flutter_inappwebview):
+- **Schema v2→v3**: ReadingPositions gains `progress` (0..1 fraction) and
+  `location` (CFI) columns; migration `onUpgrade` adds them; existing
+  PDF rows keep working and `savePage` leaves them untouched.
+- `txt_to_epub.dart`: plain TXT → minimal 3-asset EPUB (container.xml,
+  OPF, XHTML chapters, mimetype **stored/uncompressed** — archive 4.5.2
+  has no `ArchiveFile.STORED`, use `..compression = CompressionType.none`;
+  deterministic output covered by tests). TXT files open through foliate-js
+  like any EPUB — one renderer, no bespoke reader.
+- `book_server.dart`: loopback shelf server gains `shelf_router`
+  (^1.1.5) routing `/foliate/**` (foliate-js assets), `/files/**` (book
+  sandbox), `/txt/**` (bash64-decoded text chapter). Router instance is
+  `.call`-able, but must not be passed as Handler directly.
+- `foliate_assets.dart`: installs the `assets/foliate/**` tree (incl.
+  `ext/` vendored zip.js + fflate) into App Support; filters basenames
+  starting with `.` (AssetManifest lists `.gitattributes` but it cannot
+  be loaded → crash). Flutter's asset bundler is non-recursive and
+  **excludes `vendor/` dirs** → vendored deps live in
+  `assets/foliate/ext/`, `view.js` rewritten to `./ext/…`, pubspec lists
+  both `- assets/foliate/` and `- assets/foliate/ext/` explicitly.
+- `docview.html` glue page: params `src/color/frac/loc`; loads the book,
+  applies color mode (normal/sepia/dark via body class + meta theme),
+  restores `frac`/`loc`, then reports `onReflowReady` + `onReflowProgress`
+  (debounced fraction + CFI) to Flutter handlers; errors report
+  `onReflowError` with stack, plus a classic-script `error` listener
+  tagging `BOOTERR <file>:<line>`. Initial startup uses
+  `.then/.catch` (top-level await = SyntaxError on older WebViews).
+- `reflow_screen.dart`: WebUri built as
+  `p.relative(storedPath, from: AppPaths.booksDir.path)` URL-encoded per
+  segment; progress saved debounced 600 ms (fraction + CFI into
+  `saveProgress`), flushed on pause/dispose; bottom bar reuses the shared
+  `ReaderBottomBar` in `fractionMode` (permille slider → `window.docviewGoToFraction`);
+  TOC via `window.docviewToc()` JSON; color cycle re-cycles mode and
+  reloads through the (cached) `_bookUrlFuture` so the server stays up;
+  `useHybridComposition: true`; opaque surface scrim + PulseLoader while
+  booting; graceful `_error` screen on reflow errors (old WebViews land
+  here safely, no crash).
+- `reader_screen.dart`: when `doc.format != pdf` and format ∈
+  `reflowFormats`, auto-dispatch to `ReflowScreen`. MOBI/AZW3/FB2/CBZ are
+  still "not supported yet" stubs (P3.5).
+- Android manifest: `<uses-permission android:name="android.permission.INTERNET"/>`
+  (loopback ServerSocket failed without it — "Operation not permitted"),
+  `android:usesCleartextTraffic="true"` (loopback http is treated as
+  cleartext), `<meta-data android:name="io.flutter.embedding.android.EnableImpeller"
+  android:value="false"/>`.
+
+Key debugging lessons (worth keeping):
+1. **Impeller blank WebView**: with Impeller (default in this Flutter),
+   the platform view WebView never painted (or painted dark) — the
+   status bar even pulsed. Explicit Impeller opt-out in the manifest
+   fixes it globally for the app.
+2. **Android OEM WebView versions**: quick_phone/old_phone shipped
+   WebView 83 → foliate-js's private class methods (`#emit`) hard-fail at
+   parse time. Minimum WebView is 84+; old AVDs now show the graceful
+   error screen instead. Document in README.
+3. **Flutter asset bundler quirks**: non-recursive; silently drops
+   `vendor/` paths; hidden dotfiles appear in the manifest but are
+   unloadable.
+4. **Emulator battery script**: resident **Gradle daemon (-Xmx2g) +
+   Kotlin compile daemon (7200s keepalive)** held 3.5–4.5 GB of the
+   7.6 GB host for the whole session — qemu died silently whenever the
+   host was pressured. New permanent rules, embedded in the
+   `tool/battery_one.sh` / `tool/battery_all.sh` scripts: kill both
+   daemons immediately after *every* build; boot AVDs with `-memory 2048`;
+   never build while an emulator is running; one AVD at a time; bracketed
+   pkill patterns only (`[G]radleDaemon`).
+5. **quick_phone ATD image never painted WebView content** (even plain
+   HTML). Swapped the AVD image to
+   `system-images/android-36/google_apis/x86_64` (`tag.id=google_apis`,
+   `image.sysdir` update in `config.ini`); WebView now reports a modern
+   version and the battery EPUB renders.
+
+Battery: `tool/battery_one.sh <avd>` runs install → cold launch →
+screenshot → swipe page-turn screenshot → force-stop → relaunch
+(resume screenshot) → logcat dumps → teardown, with the daemon rules
+enforced before/after. `tool/battery_all.sh` runs the 4 AVDs serially
+and greps FATALs. Results at 0.4.0+4: ALL FATAL-free; pixel_7 +
+pixel_tablet + quick_phone render the battery EPUB (Chapter Wind,
+progress slider functional, resume round-trip verified); old_phone shows
+the graceful WebView-83 error screen by design.
+
+Tests: `test/txt_epub_test.dart` (converter: mimetype position/
+compression, OPF structure, chapter split, determinism) + new
+`reading_repository` saveProgress case → **17/17**, analyze clean.
+
+Releases/DocView.apk rebuilt: arm64 0.4.0+4 ≈ 31.5 MB (splits also built
+for armeabi-v7a/x86_64).
+
+Open for P3.5: MOBI/AZW3/FB2 decode (convert→EPUB per D4) + CBZ pager;
+search in reflow docs (P5); battery screenshots sometimes show a
+"System UI isn't responding" ANR dialog — host-stress cosmetic only,
+app itself FATAL-free.

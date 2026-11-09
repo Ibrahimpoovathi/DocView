@@ -69,6 +69,12 @@ class ReadingPositions extends Table {
   IntColumn get documentId => integer().unique().references(Documents, #id)();
   IntColumn get pageNumber => integer()();
 
+  /// Reflow readers: 0..1 document fraction (page grids don't apply).
+  RealColumn get progress => real().nullable()();
+
+  /// Reflow readers: opaque relocator string (EPUB CFI etc.) for exact resume.
+  TextColumn get location => text().nullable()();
+
   TextColumn get fitMode => textEnum<ViewerFitMode>()();
   TextColumn get colorMode => textEnum<ViewerColorMode>()();
   DateTimeColumn get updatedAt => dateTime().clientDefault(() => DateTime.now())();
@@ -85,7 +91,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase(super.e);
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -93,6 +99,10 @@ class AppDatabase extends _$AppDatabase {
         onUpgrade: (m, from, to) async {
           if (from < 2) {
             await m.createTable(readingPositions);
+          }
+          if (from < 3) {
+            await m.addColumn(readingPositions, readingPositions.progress);
+            await m.addColumn(readingPositions, readingPositions.location);
           }
         },
       );

@@ -1840,6 +1840,28 @@ class $ReadingPositionsTable extends ReadingPositions
     type: DriftSqlType.int,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _progressMeta = const VerificationMeta(
+    'progress',
+  );
+  @override
+  late final GeneratedColumn<double> progress = GeneratedColumn<double>(
+    'progress',
+    aliasedName,
+    true,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _locationMeta = const VerificationMeta(
+    'location',
+  );
+  @override
+  late final GeneratedColumn<String> location = GeneratedColumn<String>(
+    'location',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   late final GeneratedColumnWithTypeConverter<ViewerFitMode, String> fitMode =
       GeneratedColumn<String>(
@@ -1874,6 +1896,8 @@ class $ReadingPositionsTable extends ReadingPositions
   List<GeneratedColumn> get $columns => [
     documentId,
     pageNumber,
+    progress,
+    location,
     fitMode,
     colorMode,
     updatedAt,
@@ -1906,6 +1930,18 @@ class $ReadingPositionsTable extends ReadingPositions
     } else if (isInserting) {
       context.missing(_pageNumberMeta);
     }
+    if (data.containsKey('progress')) {
+      context.handle(
+        _progressMeta,
+        progress.isAcceptableOrUnknown(data['progress']!, _progressMeta),
+      );
+    }
+    if (data.containsKey('location')) {
+      context.handle(
+        _locationMeta,
+        location.isAcceptableOrUnknown(data['location']!, _locationMeta),
+      );
+    }
     if (data.containsKey('updated_at')) {
       context.handle(
         _updatedAtMeta,
@@ -1929,6 +1965,14 @@ class $ReadingPositionsTable extends ReadingPositions
         DriftSqlType.int,
         data['${effectivePrefix}page_number'],
       )!,
+      progress: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}progress'],
+      ),
+      location: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}location'],
+      ),
       fitMode: $ReadingPositionsTable.$converterfitMode.fromSql(
         attachedDatabase.typeMapping.read(
           DriftSqlType.string,
@@ -1964,12 +2008,20 @@ class $ReadingPositionsTable extends ReadingPositions
 class ReadingPosition extends DataClass implements Insertable<ReadingPosition> {
   final int documentId;
   final int pageNumber;
+
+  /// Reflow readers: 0..1 document fraction (page grids don't apply).
+  final double? progress;
+
+  /// Reflow readers: opaque relocator string (EPUB CFI etc.) for exact resume.
+  final String? location;
   final ViewerFitMode fitMode;
   final ViewerColorMode colorMode;
   final DateTime updatedAt;
   const ReadingPosition({
     required this.documentId,
     required this.pageNumber,
+    this.progress,
+    this.location,
     required this.fitMode,
     required this.colorMode,
     required this.updatedAt,
@@ -1979,6 +2031,12 @@ class ReadingPosition extends DataClass implements Insertable<ReadingPosition> {
     final map = <String, Expression>{};
     map['document_id'] = Variable<int>(documentId);
     map['page_number'] = Variable<int>(pageNumber);
+    if (!nullToAbsent || progress != null) {
+      map['progress'] = Variable<double>(progress);
+    }
+    if (!nullToAbsent || location != null) {
+      map['location'] = Variable<String>(location);
+    }
     {
       map['fit_mode'] = Variable<String>(
         $ReadingPositionsTable.$converterfitMode.toSql(fitMode),
@@ -1997,6 +2055,12 @@ class ReadingPosition extends DataClass implements Insertable<ReadingPosition> {
     return ReadingPositionsCompanion(
       documentId: Value(documentId),
       pageNumber: Value(pageNumber),
+      progress: progress == null && nullToAbsent
+          ? const Value.absent()
+          : Value(progress),
+      location: location == null && nullToAbsent
+          ? const Value.absent()
+          : Value(location),
       fitMode: Value(fitMode),
       colorMode: Value(colorMode),
       updatedAt: Value(updatedAt),
@@ -2011,6 +2075,8 @@ class ReadingPosition extends DataClass implements Insertable<ReadingPosition> {
     return ReadingPosition(
       documentId: serializer.fromJson<int>(json['documentId']),
       pageNumber: serializer.fromJson<int>(json['pageNumber']),
+      progress: serializer.fromJson<double?>(json['progress']),
+      location: serializer.fromJson<String?>(json['location']),
       fitMode: $ReadingPositionsTable.$converterfitMode.fromJson(
         serializer.fromJson<String>(json['fitMode']),
       ),
@@ -2026,6 +2092,8 @@ class ReadingPosition extends DataClass implements Insertable<ReadingPosition> {
     return <String, dynamic>{
       'documentId': serializer.toJson<int>(documentId),
       'pageNumber': serializer.toJson<int>(pageNumber),
+      'progress': serializer.toJson<double?>(progress),
+      'location': serializer.toJson<String?>(location),
       'fitMode': serializer.toJson<String>(
         $ReadingPositionsTable.$converterfitMode.toJson(fitMode),
       ),
@@ -2039,12 +2107,16 @@ class ReadingPosition extends DataClass implements Insertable<ReadingPosition> {
   ReadingPosition copyWith({
     int? documentId,
     int? pageNumber,
+    Value<double?> progress = const Value.absent(),
+    Value<String?> location = const Value.absent(),
     ViewerFitMode? fitMode,
     ViewerColorMode? colorMode,
     DateTime? updatedAt,
   }) => ReadingPosition(
     documentId: documentId ?? this.documentId,
     pageNumber: pageNumber ?? this.pageNumber,
+    progress: progress.present ? progress.value : this.progress,
+    location: location.present ? location.value : this.location,
     fitMode: fitMode ?? this.fitMode,
     colorMode: colorMode ?? this.colorMode,
     updatedAt: updatedAt ?? this.updatedAt,
@@ -2057,6 +2129,8 @@ class ReadingPosition extends DataClass implements Insertable<ReadingPosition> {
       pageNumber: data.pageNumber.present
           ? data.pageNumber.value
           : this.pageNumber,
+      progress: data.progress.present ? data.progress.value : this.progress,
+      location: data.location.present ? data.location.value : this.location,
       fitMode: data.fitMode.present ? data.fitMode.value : this.fitMode,
       colorMode: data.colorMode.present ? data.colorMode.value : this.colorMode,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
@@ -2068,6 +2142,8 @@ class ReadingPosition extends DataClass implements Insertable<ReadingPosition> {
     return (StringBuffer('ReadingPosition(')
           ..write('documentId: $documentId, ')
           ..write('pageNumber: $pageNumber, ')
+          ..write('progress: $progress, ')
+          ..write('location: $location, ')
           ..write('fitMode: $fitMode, ')
           ..write('colorMode: $colorMode, ')
           ..write('updatedAt: $updatedAt')
@@ -2076,14 +2152,23 @@ class ReadingPosition extends DataClass implements Insertable<ReadingPosition> {
   }
 
   @override
-  int get hashCode =>
-      Object.hash(documentId, pageNumber, fitMode, colorMode, updatedAt);
+  int get hashCode => Object.hash(
+    documentId,
+    pageNumber,
+    progress,
+    location,
+    fitMode,
+    colorMode,
+    updatedAt,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is ReadingPosition &&
           other.documentId == this.documentId &&
           other.pageNumber == this.pageNumber &&
+          other.progress == this.progress &&
+          other.location == this.location &&
           other.fitMode == this.fitMode &&
           other.colorMode == this.colorMode &&
           other.updatedAt == this.updatedAt);
@@ -2092,6 +2177,8 @@ class ReadingPosition extends DataClass implements Insertable<ReadingPosition> {
 class ReadingPositionsCompanion extends UpdateCompanion<ReadingPosition> {
   final Value<int> documentId;
   final Value<int> pageNumber;
+  final Value<double?> progress;
+  final Value<String?> location;
   final Value<ViewerFitMode> fitMode;
   final Value<ViewerColorMode> colorMode;
   final Value<DateTime> updatedAt;
@@ -2099,6 +2186,8 @@ class ReadingPositionsCompanion extends UpdateCompanion<ReadingPosition> {
   const ReadingPositionsCompanion({
     this.documentId = const Value.absent(),
     this.pageNumber = const Value.absent(),
+    this.progress = const Value.absent(),
+    this.location = const Value.absent(),
     this.fitMode = const Value.absent(),
     this.colorMode = const Value.absent(),
     this.updatedAt = const Value.absent(),
@@ -2107,6 +2196,8 @@ class ReadingPositionsCompanion extends UpdateCompanion<ReadingPosition> {
   ReadingPositionsCompanion.insert({
     required int documentId,
     required int pageNumber,
+    this.progress = const Value.absent(),
+    this.location = const Value.absent(),
     required ViewerFitMode fitMode,
     required ViewerColorMode colorMode,
     this.updatedAt = const Value.absent(),
@@ -2118,6 +2209,8 @@ class ReadingPositionsCompanion extends UpdateCompanion<ReadingPosition> {
   static Insertable<ReadingPosition> custom({
     Expression<int>? documentId,
     Expression<int>? pageNumber,
+    Expression<double>? progress,
+    Expression<String>? location,
     Expression<String>? fitMode,
     Expression<String>? colorMode,
     Expression<DateTime>? updatedAt,
@@ -2126,6 +2219,8 @@ class ReadingPositionsCompanion extends UpdateCompanion<ReadingPosition> {
     return RawValuesInsertable({
       if (documentId != null) 'document_id': documentId,
       if (pageNumber != null) 'page_number': pageNumber,
+      if (progress != null) 'progress': progress,
+      if (location != null) 'location': location,
       if (fitMode != null) 'fit_mode': fitMode,
       if (colorMode != null) 'color_mode': colorMode,
       if (updatedAt != null) 'updated_at': updatedAt,
@@ -2136,6 +2231,8 @@ class ReadingPositionsCompanion extends UpdateCompanion<ReadingPosition> {
   ReadingPositionsCompanion copyWith({
     Value<int>? documentId,
     Value<int>? pageNumber,
+    Value<double?>? progress,
+    Value<String?>? location,
     Value<ViewerFitMode>? fitMode,
     Value<ViewerColorMode>? colorMode,
     Value<DateTime>? updatedAt,
@@ -2144,6 +2241,8 @@ class ReadingPositionsCompanion extends UpdateCompanion<ReadingPosition> {
     return ReadingPositionsCompanion(
       documentId: documentId ?? this.documentId,
       pageNumber: pageNumber ?? this.pageNumber,
+      progress: progress ?? this.progress,
+      location: location ?? this.location,
       fitMode: fitMode ?? this.fitMode,
       colorMode: colorMode ?? this.colorMode,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -2159,6 +2258,12 @@ class ReadingPositionsCompanion extends UpdateCompanion<ReadingPosition> {
     }
     if (pageNumber.present) {
       map['page_number'] = Variable<int>(pageNumber.value);
+    }
+    if (progress.present) {
+      map['progress'] = Variable<double>(progress.value);
+    }
+    if (location.present) {
+      map['location'] = Variable<String>(location.value);
     }
     if (fitMode.present) {
       map['fit_mode'] = Variable<String>(
@@ -2184,6 +2289,8 @@ class ReadingPositionsCompanion extends UpdateCompanion<ReadingPosition> {
     return (StringBuffer('ReadingPositionsCompanion(')
           ..write('documentId: $documentId, ')
           ..write('pageNumber: $pageNumber, ')
+          ..write('progress: $progress, ')
+          ..write('location: $location, ')
           ..write('fitMode: $fitMode, ')
           ..write('colorMode: $colorMode, ')
           ..write('updatedAt: $updatedAt, ')
@@ -4170,6 +4277,8 @@ typedef $$ReadingPositionsTableCreateCompanionBuilder =
     ReadingPositionsCompanion Function({
       required int documentId,
       required int pageNumber,
+      Value<double?> progress,
+      Value<String?> location,
       required ViewerFitMode fitMode,
       required ViewerColorMode colorMode,
       Value<DateTime> updatedAt,
@@ -4179,6 +4288,8 @@ typedef $$ReadingPositionsTableUpdateCompanionBuilder =
     ReadingPositionsCompanion Function({
       Value<int> documentId,
       Value<int> pageNumber,
+      Value<double?> progress,
+      Value<String?> location,
       Value<ViewerFitMode> fitMode,
       Value<ViewerColorMode> colorMode,
       Value<DateTime> updatedAt,
@@ -4225,6 +4336,16 @@ class $$ReadingPositionsTableFilterComposer
   });
   ColumnFilters<int> get pageNumber => $composableBuilder(
     column: $table.pageNumber,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get progress => $composableBuilder(
+    column: $table.progress,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get location => $composableBuilder(
+    column: $table.location,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -4283,6 +4404,16 @@ class $$ReadingPositionsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<double> get progress => $composableBuilder(
+    column: $table.progress,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get location => $composableBuilder(
+    column: $table.location,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get fitMode => $composableBuilder(
     column: $table.fitMode,
     builder: (column) => ColumnOrderings(column),
@@ -4335,6 +4466,12 @@ class $$ReadingPositionsTableAnnotationComposer
     column: $table.pageNumber,
     builder: (column) => column,
   );
+
+  GeneratedColumn<double> get progress =>
+      $composableBuilder(column: $table.progress, builder: (column) => column);
+
+  GeneratedColumn<String> get location =>
+      $composableBuilder(column: $table.location, builder: (column) => column);
 
   GeneratedColumnWithTypeConverter<ViewerFitMode, String> get fitMode =>
       $composableBuilder(column: $table.fitMode, builder: (column) => column);
@@ -4401,6 +4538,8 @@ class $$ReadingPositionsTableTableManager
               ({
                 Value<int> documentId = const Value.absent(),
                 Value<int> pageNumber = const Value.absent(),
+                Value<double?> progress = const Value.absent(),
+                Value<String?> location = const Value.absent(),
                 Value<ViewerFitMode> fitMode = const Value.absent(),
                 Value<ViewerColorMode> colorMode = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
@@ -4408,6 +4547,8 @@ class $$ReadingPositionsTableTableManager
               }) => ReadingPositionsCompanion(
                 documentId: documentId,
                 pageNumber: pageNumber,
+                progress: progress,
+                location: location,
                 fitMode: fitMode,
                 colorMode: colorMode,
                 updatedAt: updatedAt,
@@ -4417,6 +4558,8 @@ class $$ReadingPositionsTableTableManager
               ({
                 required int documentId,
                 required int pageNumber,
+                Value<double?> progress = const Value.absent(),
+                Value<String?> location = const Value.absent(),
                 required ViewerFitMode fitMode,
                 required ViewerColorMode colorMode,
                 Value<DateTime> updatedAt = const Value.absent(),
@@ -4424,6 +4567,8 @@ class $$ReadingPositionsTableTableManager
               }) => ReadingPositionsCompanion.insert(
                 documentId: documentId,
                 pageNumber: pageNumber,
+                progress: progress,
+                location: location,
                 fitMode: fitMode,
                 colorMode: colorMode,
                 updatedAt: updatedAt,

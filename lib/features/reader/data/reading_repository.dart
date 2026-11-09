@@ -33,6 +33,14 @@ class ReadingRepository {
   Future<void> savePage(int docId, int pageNumber) =>
       upsert(_readingPositionsCompanion(docId, pageNumber: pageNumber));
 
+  /// Reflow readers: whole-document fraction + relocator (CFI etc.).
+  Future<void> saveProgress(int docId, double fraction, String? location) =>
+      upsert(_readingPositionsCompanion(
+        docId,
+        progress: fraction,
+        location: location,
+      ));
+
   Future<void> savePrefs(
     int docId, {
     ViewerFitMode? fitMode,
@@ -47,6 +55,8 @@ class ReadingRepository {
   ReadingPositionsCompanion _readingPositionsCompanion(
     int docId, {
     int? pageNumber,
+    double? progress,
+    String? location,
     ViewerFitMode? fitMode,
     ViewerColorMode? colorMode,
   }) =>
@@ -54,6 +64,8 @@ class ReadingRepository {
         documentId: Value(docId),
         pageNumber:
             pageNumber == null ? const Value.absent() : Value(pageNumber),
+        progress: progress == null ? const Value.absent() : Value(progress),
+        location: location == null ? const Value.absent() : Value(location),
         fitMode:
             fitMode == null ? const Value.absent() : Value(fitMode),
         colorMode:

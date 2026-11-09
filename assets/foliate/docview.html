@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>DocView</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #ffffff;
+  }
+  foliate-view { height: 100%; width: 100%; }
+  #err {
+    display: none;
+    padding: 2rem;
+    font: 13px monospace;
+    white-space: pre-wrap;
+  }
+</style>
+</head>
+<body>
+<foliate-view id="view"></foliate-view>
+<pre id="err"></pre>
+
+<script>
+window.addEventListener('error', function (e) {
+  var info = (e.filename || '?') + ':' + (e.lineno || 0) + ' -> ' + e.message
+  console.error('BOOTERR ' + info)
+  window.flutter_inappwebview?.callHandler?.('onReflowError', info)
+})
+</script>
+
+<script type="module">
+import { makeBook } from './view.js'
+
+const params = new URLSearchParams(location.search)
+const src = params.get('src') ?? ''
+const colorMode = params.get('color') ?? 'normal'
+const goFraction = params.get('frac')
+const goLocation = params.get('loc')
+
+const view = document.createElement('foliate-view')
+document.body.append(view)
+
+const notify = (name, payload) => {
+  window.flutter_inappwebview?.callHandler?.(name, payload)
+}
+
+const showError = err => {
+  const el = document.getElementById('err')
+  el.style.display = 'block'
+  el.textContent = String(err?.stack ?? err)
+  console.error(err)
+}
+
+const pageCSS = () => `
+    html {
+        color-scheme: ${colorMode === 'dark' ? 'dark' : 'light'};
+        background: ${THEME_VIS.bg};
+    }
+    body {
+        background: ${THEME_VIS.bg};
+        filter: ${THEME_VIS.filter};
+        -webkit-text-fill-color: ${THEME_VIS.fg};
+    }
+    :root { --bg: ${THEME_VIS.bg}; --fg: ${THEME_VIS.fg}; }
+    h1, h2, h3, h4, h5, h6, p, li, blockquote, dd {
+        color: ${THEME_VIS.fg};
+    }
+    a:link { color: ${THEME_VIS.fg}; }
+    p, li, blockquote, dd { line-height: 1.5; text-align: start; }
+    pre { white-space: pre-wrap !important; }
+`
+
+const THEME_VIS =
+  colorMode === 'dark'
+    ? { bg: '#241f1a', fg: '#e6ddcf', filter: 'saturate(0.85)' }
+    : colorMode === 'sepia'
+      ? { bg: '#f4ebd8', fg: '#40342a', filter: 'sepia(0.28) saturate(0.9)' }
+      : { bg: '#ffffff', fg: '#201a15', filter: 'none' }
+
+const open = async () => {
+  const book = await makeBook(src)
+  await view.open(book)
+
+  view.addEventListener('load', ({ detail }) => {
+    const doc = detail.doc
+    if (!doc?.head) return
+    const $style = doc.createElement('style')
+    $style.textContent = pageCSS()
+    doc.head.append($style)
+  })
+
+  view.addEventListener('relocate', ({ detail }) => {
+    notify('onReflowProgress', {
+      fraction: detail.fraction ?? null,
+      cfi: detail.cfi ?? null,
+      tocLabel:
+        typeof detail.tocItem?.label === 'string'
+          ? detail.tocItem.label.trim()
+          : null,
+    })
+  })
+
+  view.renderer?.setStyles?.(pageCSS())
+
+  if (goLocation && goLocation !== 'first') {
+    await view.init({ lastLocation: goLocation })
+  } else if (goFraction) {
+    await view.goToFraction(
+      Math.max(0, Math.min(1, parseFloat(goFraction) || 0)),
+    )
+  } else {
+    await view.init({ lastLocation: null, showTextStart: false })
+  }
+
+}
+
+open()
+  .then(() => notify('onReflowReady', { colorMode }))
+  .catch(err => {
+    showError(err)
+    notify('onReflowError', `${err?.name ?? 'Error'}: ${err?.message ?? err}`)
+  })
+
+window.docviewToc = async () => {
+  const toc = view.toc ?? null
+  if (!toc) return null
+  const out = []
+  const walk = (nodes, depth) => {
+    for (const n of nodes) {
+      out.push({
+        label: typeof n.label === 'string' ? n.label.trim() : '',
+        href: n.href?.() ?? null,
+        subitems: Array.isArray(n.subitems),
+      })
+    }
+  }
+  // depth-first walk with depth
+  const record = (nodes, depth) => {
+    for (const n of nodes) {
+      out.push({
+        label: typeof n.label === 'string' ? n.label.trim() : '',
+        href: n.href?.() ?? null,
+        depth,
+      })
+      if (Array.isArray(n.subitems)) record(n.subitems, depth + 1)
+    }
+  }
+  record(toc, 0)
+  return out
+}
+
+window.docviewCommand = cmd => {
+  switch (cmd) {
+    case 'left': return view.goLeft?.()
+    case 'right': return view.goRight?.()
+    case 'first': return view.goToFraction?.(0)
+    case 'fraction':
+      return null
+    default:
+      return null
+  }
+}
+window.docviewGoToFraction = f => view.goToFraction?.(f)
+window.docviewGoTo = loc => view.goTo?.(loc)
+</script>
+</body>
+</html>
