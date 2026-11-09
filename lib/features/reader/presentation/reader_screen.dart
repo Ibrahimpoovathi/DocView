@@ -12,6 +12,7 @@ import '../../../core/storage/database.dart';
 import '../../library/presentation/providers.dart';
 import '../domain/viewer_prefs.dart';
 import 'reflow_screen.dart';
+import 'office_screens.dart';
 
 /// Manual (not codegen): drift data-class generics break riverpod_generator.
 final docByIdProvider = FutureProvider.family<Document?, int>(
@@ -172,6 +173,19 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     if (doc.format != DocFormat.pdf) {
       if (reflowFormats.contains(doc.format)) {
         return ReflowScreen(doc: doc);
+      }
+      switch (doc.format) {
+        case DocFormat.docx:
+          return DocxScreen(doc: doc);
+        case DocFormat.xlsx:
+          return XlsxScreen(doc: doc);
+        case DocFormat.pptx:
+          return PptxScreen(doc: doc);
+        case DocFormat.odt:
+        case DocFormat.rtf:
+          return TextDocScreen(doc: doc);
+        case _:
+          break;
       }
       return _ReaderScaffold(
         child: EmptyState(

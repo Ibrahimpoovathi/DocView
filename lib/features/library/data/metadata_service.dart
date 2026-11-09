@@ -145,12 +145,12 @@ class MetadataService {
   }
 
   static Iterable<String> _opfTitle(XmlDocument opf) => opf
-      .findAllElements('title', namespace: '*')
+      .findAllElements('title', namespaceUri: '*')
       .map((e) => e.innerText.trim())
       .where((t) => t.isNotEmpty);
 
   static String? _opfAuthor(XmlDocument opf) {
-    for (final e in opf.findAllElements('creator', namespace: '*')) {
+    for (final e in opf.findAllElements('creator', namespaceUri: '*')) {
       final name = e.innerText.trim();
       if (name.isNotEmpty) return name;
     }
@@ -160,10 +160,10 @@ class MetadataService {
   /// Manifest item with properties containing "cover-image" (EPUB 3) or the
   /// legacy meta[name=cover content=<id>] (EPUB 2).
   static String? _opfCoverHref(XmlDocument opf) {
-    final manifest = {for (final i in opf.findAllElements('item', namespace: '*'))
+    final manifest = {for (final i in opf.findAllElements('item', namespaceUri: '*'))
       i.getAttribute('id'): i};
     // EPUB 3: properties="cover-image ..."
-    for (final item in opf.findAllElements('item', namespace: '*')) {
+    for (final item in opf.findAllElements('item', namespaceUri: '*')) {
       final props = item.getAttribute('properties') ?? '';
       if (props.split(' ').contains('cover-image')) {
         final href = item.getAttribute('href');
@@ -171,7 +171,7 @@ class MetadataService {
       }
     }
     // EPUB 2: <meta name="cover" content="cover-id"/>
-    for (final m in opf.findAllElements('meta', namespace: '*')) {
+    for (final m in opf.findAllElements('meta', namespaceUri: '*')) {
       if ((m.getAttribute('name') ?? '') == 'cover') {
         final id = m.getAttribute('content');
         final href = id == null ? null : manifest[id]?.getAttribute('href');

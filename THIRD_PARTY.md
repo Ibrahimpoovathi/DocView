@@ -19,3 +19,7 @@
 All dependencies are declared in `pubspec.yaml` with their own licenses
 (check `pubspec.lock`); the notable rendering engine is **pdfrx**
 (MIT, Apache pdfium).
+
+- **docx_file_viewer** + **docx_creator** — Apache-2.0/MIT (repo LICENSE),
+  native Flutter DOCX widgets and the underlying DOCX build/parse model.
+- **excel_plus** — MIT, streaming XLSX reader (also reads legacy .xls).

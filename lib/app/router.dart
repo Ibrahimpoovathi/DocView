@@ -8,6 +8,11 @@ import '../../features/reader/presentation/reader_screen.dart';
 const batteryHook =
     bool.fromEnvironment('DOCVIEW_BATTERY', defaultValue: false);
 
+/// Battery build can pin which seed format auto-opens first
+/// (`--dart-define=DOCVIEW_BATTERY_OPEN=xlsx` etc.) so the battery can
+/// exercise each reader. Empty = default docx-first priority.
+const batteryOpenFormat = String.fromEnvironment('DOCVIEW_BATTERY_OPEN');
+
 final router = GoRouter(
   initialLocation: '/library',
   routes: [

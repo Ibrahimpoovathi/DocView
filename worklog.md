@@ -285,3 +285,67 @@ Open for P3.5: MOBI/AZW3/FB2 decode (convert→EPUB per D4) + CBZ pager;
 search in reflow docs (P5); battery screenshots sometimes show a
 "System UI isn't responding" ANR dialog — host-stress cosmetic only,
 app itself FATAL-free.
+
+## 2026-11-09 — Phase 4 done (0.5.0+5)
+
+**Office readers shipped** (DOCX native, XLSX tables, PPTX/ODT/RTF text).
+
+Per user decision: **zero-risk scope** — `office_oxide_ffi` (unverified
+publisher, 8 downloads, native-lib build hook) was rejected; legacy
+binary .doc/.ppt are deferred to a later phase (they surface the
+existing "not supported yet" stub, no FATALs).
+
+Dependencies (after our `xml: ^6.6.1` pin was bumped to `^7.0.1` — the
+old cap silently forced pub to resolve ancient package versions):
+- `docx_file_viewer` 1.0.5 (MIT/Apache, verified publisher, 6.3k dl)
+  — pure-Flutter DOCX widgets, DocxSearchController, zoom, light/dark
+  themes. Pulled-in `docx_creator` 1.4.0 (direct dep too: used to
+  generate battery DOCX in memory). xml `namespace` → `namespaceUri`
+  rename updated our EPUB OPF parsing.
+- `excel_plus` 2.29.2 (MIT, verified, 51k dl, SAX + lazy sheets) —
+  xlsx reader incl. legacy .xls (BIFF8 read-only), async decode
+  (`decodeBytesAsync`), `Data.displayText` for formatted cells,
+  `streamRows` available for the future large-sheet path.
+
+Data extractors (hand-rolled, all unit-tested):
+- `pptx_text.dart`: slides from `ppt/slides/slideN.xml` `<a:t>` runs,
+  sorted by real slide number (zip order irrelevant), first run = title.
+- `odt_text.dart`: `content.xml` walk, `text:h`/`text:p` in document
+  order (nested list paragraphs preserved).
+- `rtf_text.dart`: compact RTF state machine — group/destination skips
+  (`{\*\...}`, fonttbl/colortbl/stylesheet/info), `\'hh` cp1252 escapes
+  `\ par/line/sect/tab`, `\uN;` with `\uc` fallback-char suppression,
+  `\binN` skip. RTF `\uNNNN` is **decimal** (test bug caught by tests).
+
+Screens (`office_screens.dart`, shared `OfficeReaderState` base):
+- `DocxScreen`: `DocxViewWithSearch` inside our themed Scaffold; color
+  mode → DocxViewTheme.light()/dark() + paper background; position
+  restore not exposed by the widget (openedAt still saved).
+- `XlsxScreen`: decodeBytesAsync → capped 3000 rows/sheet; sheet
+  ChoiceChip tabs; frozen styled header row; `IntrinsicColumnWidth`
+  (FlexColumnWidth crushed cells on narrow screens); progress column
+  saves scroll fraction and the **sheet name** in `location`.
+- `PptxScreen`: slide overview cards → per-slide readable text page.
+- `TextDocScreen`: ODT/RTF scrollable selectable text; scroll fraction
+  persisted via `saveProgress`.
+
+Dispatch: reader_screen switch — office formats before the
+"not supported yet" stub. No schema change: Phase 3's
+`progress`/`location` columns carry office scroll positions.
+
+Battery: seed extended with `battery.docx/xlsx/pptx/odt/rtf`
+(docx_creator + excel_plus generate them in memory; pptx/odt zipped by
+hand); battery runs can pin the auto-open format with
+`--dart-define=DOCVIEW_BATTERY_OPEN=<fmt>`. Results: DOCX on all 4 AVDs
+(including old_phone API 30 — DOCX is pure Flutter, no WebView);
+XLSX (styled table + tabs), PPTX (3-slide overview), ODT (heading +
+paragraphs), RTF (é escape, skipped `{\*\generator}`) on pixel_7 —
+ALL FATAL-FREE.
+
+Tests: 25/25 (8 new extractor tests). `flutter analyze` 0 issues.
+Releases/DocView.apk rebuilt: arm64 0.5.0+5 ≈ 32.5 MB.
+
+Open next: P4.5 legacy .doc/.ppt (needs an engine decision — revisit
+office_oxide_ffi maturity or an offline_document_viewer bundled option);
+large-sheet lazy rows (streamRows) if real-world workbooks hit the cap;
+Phase 5 search (FTS5 + in-doc).

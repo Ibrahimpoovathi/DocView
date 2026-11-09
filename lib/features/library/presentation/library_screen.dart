@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
+import 'package:docx_creator/docx_creator.dart';
+import 'package:excel_plus/excel_plus.dart';
 import 'package:file_picker/file_picker.dart' as fp;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,6 +13,7 @@ import 'package:go_router/go_router.dart';
 
 
 import '../../../app/router.dart';
+
 import '../../../core/format/doc_format.dart';
 import '../../../core/design/dv.dart';
 import '../../../core/design/widgets/doc_card.dart';
@@ -41,8 +44,9 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
   }
 
   /// Battery hook (debug-define builds only): import the bundled mini PDF
-  /// plus a generated EPUB and TXT through the real pipeline and deep-open
-  /// the EPUB's reader.
+  /// plus generated EPUB/TXT and office docs (DOCX/XLSX/PPTX/ODT/RTF)
+  /// through the real pipeline and deep-open the first office doc — Phase 4
+  /// exercises the new readers.
   Future<void> _batterySeed() async {
     final data = await rootBundle.load('assets/battery/mini.pdf');
     final summary = await ref.read(importServiceProvider).importBytes(
@@ -50,6 +54,11 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
             'mini.pdf': data.buffer.asUint8List(),
             'battery.epub': _makeEpub(),
             'battery.txt': _makeTxt(),
+            'battery.docx': await _makeDocx(),
+            'battery.xlsx': _makeXlsx(),
+            'battery.pptx': _makePptx(),
+            'battery.odt': _makeOdt(),
+            'battery.rtf': _makeRtf(),
           },
         );
     if (summary.added < 1) return;
@@ -57,12 +66,46 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
         .read(libraryRepositoryProvider)
         .watchLibrary(const LibraryQuery())
         .first;
-    Document? doc;
-    for (final d in docs) {
-      if (d.format == DocFormat.epub) {
-        doc = d;
-        break;
+    // Battery runs can pin a specific seed format (DOCVIEW_BATTERY_OPEN).
+    // Default: office formats first so the battery exercises Phase 4.
+    final pinned = () {
+      switch (batteryOpenFormat.toLowerCase()) {
+        case 'xlsx':
+          return DocFormat.xlsx;
+        case 'pptx':
+          return DocFormat.pptx;
+        case 'odt':
+          return DocFormat.odt;
+        case 'rtf':
+          return DocFormat.rtf;
+        case 'pdf':
+          return DocFormat.pdf;
+        case 'epub':
+          return DocFormat.epub;
+        case 'docx':
+          return DocFormat.docx;
+        default:
+          return null;
       }
+    }();
+    const priority = [
+          DocFormat.docx,
+          DocFormat.xlsx,
+          DocFormat.pptx,
+          DocFormat.odt,
+          DocFormat.rtf,
+          DocFormat.epub,
+          DocFormat.txt,
+    ];
+    Document? doc;
+    for (final fmt in [?pinned, ...priority]) {
+      for (final d in docs) {
+        if (d.format == fmt) {
+          doc = d;
+          break;
+        }
+      }
+      if (doc != null) break;
     }
     doc ??= docs.isNotEmpty ? docs.first : null;
     if (!mounted || doc == null) return;
@@ -148,6 +191,118 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
     }
     return Uint8List.fromList(utf8.encode(buf.toString()));
   }
+
+  /// Word document, generated with docx_creator (the same package that
+  /// powers the native DOCX reader).
+  Future<Uint8List> _makeDocx() async {
+    final doc = docx()
+        .h1('Battery Report')
+        .p('This Word file was generated in memory to exercise the '
+            'Phase 4 native DOCX reader through the real import pipeline.')
+        .bullet(['Paragraphs', 'Lists', 'Tables', 'Images'])
+        .table([
+          ['Region', 'Q1', 'Q2'],
+          ['Harbor', '1,200', '1,850'],
+          ['Dawn', '980', '1,420'],
+        ])
+        .build();
+    return Uint8List.fromList(await DocxExporter().exportToBytes(doc));
+  }
+
+  /// Spreadsheet, generated with excel_plus (two sheets to exercise tabs,
+  /// styled header, frozen first row in the reader).
+  Uint8List _makeXlsx() {
+    final excel = Excel.createExcel();
+    excel.rename('Sheet1', 'Report');
+    final report = excel['Report'];
+    final headerStyle = CellStyle(
+        bold: true,
+        backgroundColorHex: ExcelColor.fromHexString('#4472C4'));
+    final headers = ['Month', 'Wind', 'Harbor', 'Dawn'];
+    for (var c = 0; c < headers.length; c++) {
+      report.updateCell(
+        CellIndex.indexByColumnRow(columnIndex: c, rowIndex: 0),
+        TextCellValue(headers[c]),
+        cellStyle: headerStyle,
+      );
+    }
+    final months = [
+      ['January', '12', '18', '9'],
+      ['February', '14', '17', '11'],
+      ['March', '19', '21', '15'],
+      ['April', '22', '24', '18'],
+      ['May', '26', '27', '21'],
+    ];
+    for (var r = 0; r < months.length; r++) {
+      for (var c = 0; c < months[r].length; c++) {
+        report.updateCell(
+          CellIndex.indexByColumnRow(columnIndex: c, rowIndex: r + 1),
+          TextCellValue(months[r][c]),
+        );
+      }
+    }
+    final data = excel['Notes'];
+    data.updateCell(
+      CellIndex.indexByString('A1'),
+      TextCellValue('Second sheet checks the tab switcher'),
+    );
+    return Uint8List.fromList(excel.save()!);
+  }
+
+  /// Minimal Open XML presentation: only the slideN.xml parts the Phase 4
+  /// extractor reads (no rendering engine is involved).
+  Uint8List _makePptx() {
+    final archive = Archive();
+    String slideXml(String title, List<String> body) {
+      final sp =
+          '<p:sp><p:txBody><a:p><a:r><a:t>@</a:t></a:r></a:p></p:txBody></p:sp>';
+      final parts = StringBuffer(sp.replaceFirst('@', title));
+      for (final line in body) {
+        parts.write(sp.replaceFirst('@', line));
+      }
+      return '<?xml version="1.0" encoding="UTF-8"?>'
+          '<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
+          'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+          '<p:cSld><p:spTree>$parts</p:spTree></p:cSld></p:sld>';
+    }
+
+    void addSlide(int n, String title, List<String> body) {
+      archive.addFile(ArchiveFile.bytes(
+          'ppt/slides/slide$n.xml', utf8.encode(slideXml(title, body))));
+    }
+
+    addSlide(1, 'DocView Battery Deck', ['Phase 4 slide extraction']);
+    addSlide(2, 'Second slide', ['Overview list', 'Readable text view']);
+    addSlide(3, 'Final slide', ['That is all']);
+    return Uint8List.fromList(ZipEncoder().encode(archive));
+  }
+
+  /// OpenDocument text file (heading + paragraphs, built with archive).
+  Uint8List _makeOdt() {
+    final archive = Archive();
+    archive.addFile(ArchiveFile.bytes(
+        'mimetype', const AsciiCodec().encode('application/vnd.oasis.opendocument.text'))..compression = CompressionType.none);
+    archive.addFile(ArchiveFile.bytes(
+        'content.xml',
+        utf8.encode('''<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content
+  xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+  xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+  <office:body><office:text>
+    <text:h>Battery Notes</text:h>
+    <text:p>ODT files are Open XML-style packages; the reader unzips content.xml and extracts the paragraphs directly.</text:p>
+    <text:p>Second paragraph to have something to scroll through on the tablet.</text:p>
+  </office:text></office:body>
+</office:document-content>''')));
+    return Uint8List.fromList(ZipEncoder().encode(archive));
+  }
+
+  /// Rich text file with an escape/unicode mix (the Phase 4 RTF extractor).
+  Uint8List _makeRtf() => Uint8List.fromList(
+        utf8.encode(
+            r"{\rtf1\ansi Battery Rich Text\'e9\par Second paragraph with "
+            r'{\*\generator ignored metadata} plain body text \par Done.'),
+      );
 
   @override
   void dispose() {
