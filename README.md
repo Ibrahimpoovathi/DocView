@@ -17,8 +17,9 @@ optional user-owned WebDAV sync.
 | 6 | WebDAV sync (books + progress + notes/collections, on-demand download) | Planned |
 | 7 | Polish: big-library perf, tablet 2-pane, notes export, release pipeline | Planned |
 
-Current build: **0.6.0** (Phases 0–5: shell, library, PDF reader, reflow
-readers, office readers, search — in-doc + FTS5 library full-text). See [STUDY.md](STUDY.md) for the
+Current build: **0.7.0** (Phases 0–6: shell, library, PDF reader, reflow
+readers, office readers, search — in-doc + FTS5 library full-text,
+dictionary popup — offline StarDict + online). See [STUDY.md](STUDY.md) for the
 reference-app analysis that drove architecture decisions and [worklog.md](worklog.md)
 for the chronological build log.
 
@@ -84,7 +85,7 @@ cd ~/Applications/OpenCode/DocView
 
 ## Release APK (single artifact, rewritten every update)
 
-- Deliverable: **`releases/DocView.apk`** — arm64-only release build (v0.6.0+6 ≈ 32.5 MB),
+- Deliverable: **`releases/DocView.apk`** — arm64-only release build (v0.7.0+7 ≈ 32.8 MB),
   committed to git; regenerated and *overwritten* at the end of every change.
 - Command to reproduce: `~/flutter/bin/flutter build apk --release --split-per-abi`,
   then copy `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` → `releases/DocView.apk`.
@@ -92,13 +93,15 @@ cd ~/Applications/OpenCode/DocView
   (`app-x86_64-release.apk`) — never committed.
 - Version bumps: pubspec `version` + worklog note each update.
 
-### Test results at current build (0.6.0+6)
+### Test results at current build (0.7.0+7)
 
-Static: `flutter analyze` — 0 issues; `flutter test` — 33/33 pass
+Static: `flutter analyze` — 0 issues; `flutter test` — 49/49 pass
 (format detection, repository CRUD + soft delete + reflow saveProgress,
 import pipeline incl. dedupe-by-sha256, TXT→EPUB converter,
 PPTX/ODT/RTF extractors, empty-library widget test, FTS5 metadata/body
-search + epub/docx text extraction + findTextHits).
+search + epub/docx text extraction + findTextHits, dictionary parser +
+history + MockClient online lookup, dictzip round-trip + StarDict ifo
+parsing + article decoding).
 
 AVD battery (install, cold launch, screenshot review, FATAL/ANR logcat scan;
 run via `tool/battery_all.sh` → per-AVD `tool/battery_one.sh <avd>`):
@@ -118,10 +121,14 @@ defines — bar opens with the term pre-filled and searches automatically):
 | PDF (pdfrx `PdfTextSearcher`) | `Battery` | ✅ count `1/1`, highlight painted |
 | EPUB reflow (foliate-js `view.search`) | `ribbons` | ✅ count `1/75`, result list + hit navigation |
 | Library FTS5 (`document_fts MATCH` + `bm25`) | `ribbons` (body-only) | ✅ Library · 1 — only the EPUB matching *inside* the body |
+| Dictionary offline · PDF | `battery` (seeded StarDict) | ✅ popup with offline article, badge `Offline (Battery Seed)` |
+| Dictionary offline · EPUB reflow | `silver` (seeded StarDict) | ✅ popup with offline article |
+| Dictionary online fallback · PDF | `battery` (no offline dict yet) | ✅ popup with dictionaryapi.dev entry |
 
 Battery build (`--dart-define=DOCVIEW_BATTERY=true`, optional
 `--dart-define=DOCVIEW_BATTERY_OPEN=<fmt>`, optional
-`--dart-define=DOCVIEW_BATTERY_SEARCH=<term>`; `OPEN=none` imports the
+`--dart-define=DOCVIEW_BATTERY_SEARCH=<term>`, optional
+`--dart-define=DOCVIEW_BATTERY_DICT=<word>`; `OPEN=none` imports the
 seeds but skips the deep-open for library-only batteries) auto-imports a
 bundled `assets/battery/mini.pdf` plus in-memory `battery.epub/txt/docx/
 xlsx/pptx/odt/rtf` through the real pipeline (asset → importBytes →
@@ -149,8 +156,36 @@ DELETE+INSERT'd; `f MATCH` fails when `f` is a table alias, use
 sanitizer quotes terms, caps at 8 words, and falls back to a metadata
 substring LIKE for punctuation-only input. Legacy .doc/.ppt now show a
 conversion-guidance stub screen (re-save as .docx/.pptx); the `ppt`
-format was added to `DocFormat`/detection. Dictionary popup deferred to
-Phase 6.
+format was added to `DocFormat`/detection.
+
+**Phase 6 notes** (dictionary popup): tap/selection → bottom sheet with
+the definition, offline-first. Selection capture per reader — PDF via
+pdfrx's built-in `PdfTextSelectionParams` (long-press selects the word;
+the viewer context menu gains a "Dictionary" action via
+`customizeContextMenuItems`); reflow via a `selectionchange` bridge
+hooked on every foliate section document in `docview.html`
+(`onReflowSelection`, debounced 350 ms; single-word selections open the
+sheet, longer ones are treated as copy-flows); ODT/RTF/PPTX via
+`SelectableText.onSelectionChanged`. **DOCX is excluded** —
+`docx_file_viewer` exposes no selection callback (fork deferred).
+Offline = user-imported StarDict: Settings (drawer stub is now a real
+page) imports .ifo/.idx/.dict.dz via file_picker into
+`<appSupport>/dicts/<id>/`; the dictzip file is decompressed to a plain
+`.dict.flat` in Dart at import time (chunk-wise `gzip.decode` — every
+dictzip chunk is a standalone gzip member, and the vendored
+`ext/fflate.js` only exports `unzlibSync`, which cannot inflate gzip);
+`dictview.html` (new foliate asset, served by BookServer at
+`/dicts/...`) parses the .idx and answers lookups in a hidden 1×1
+WebView engine (`dict_engine.dart`), so no JS inflate is needed at all.
+Online fallback = dictionaryapi.dev (`http` promoted to direct dep),
+honours the Settings toggle. Recent lookups are kept in
+shared_preferences. **Lesson**: shared_preferences 2.5.x's Android
+jnigen path crashes with `NoSuchMethodError` on
+`SharedPreferencesApiRegistrar.getAll` — pinned to the classic Pigeon
+2.4.28 via `dependency_overrides` (the dep existed since Phase 0 but
+was never exercised until now). New foliate assets install via a
+version-stamped `installed.marker` (bump `foliateAssetsVersion` when
+bundled assets change).
 
 **Phase 4 notes**: DOCX = `docx_file_viewer` native widgets (search/zoom/
 selection); XLSX/XLS = `excel_plus` table reader (styled header, sheet

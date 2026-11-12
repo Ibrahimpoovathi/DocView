@@ -17,6 +17,7 @@ import '../data/rtf_text.dart';
 import '../data/text_search.dart';
 import '../domain/viewer_prefs.dart';
 import '../../library/presentation/providers.dart';
+import '../../dictionary/presentation/dictionary_sheet.dart';
 
 /// Paper colors per reading mode, shared by the office readers.
 Color officeSurface(ColorScheme cs, ViewerColorMode mode) => switch (mode) {
@@ -589,8 +590,8 @@ class _PptxScreenState extends OfficeReaderState<PptxScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               for (final line in slide.lines) ...[
-                SelectableText(
-                  line,
+                _DictSelectableText(
+                  text: line,
                   style: TextStyle(
                     fontSize: 16,
                     height: 1.5,
@@ -693,8 +694,8 @@ class _TextDocScreenState extends OfficeReaderState<TextDocScreen> {
             final par = _paragraphs[i];
             return Padding(
               padding: const EdgeInsets.only(bottom: 14),
-              child: SelectableText(
-                par.text,
+              child: _DictSelectableText(
+                text: par.text,
                 style: TextStyle(
                   fontSize: par.isHeading ? 20 : 16,
                   height: 1.55,
@@ -708,6 +709,53 @@ class _TextDocScreenState extends OfficeReaderState<TextDocScreen> {
       ),
     );
   }
+}
+
+// --- dictionary-capable selectable text ---------------------------------------
+
+/// SelectableText that opens the dictionary sheet when the user settles a
+/// single-word selection (debounced; multi-word selections are ignored).
+class _DictSelectableText extends ConsumerStatefulWidget {
+  const _DictSelectableText({required this.text, required this.style});
+
+  final String text;
+  final TextStyle style;
+
+  @override
+  ConsumerState<_DictSelectableText> createState() => _DictSelectableTextState();
+}
+
+class _DictSelectableTextState extends ConsumerState<_DictSelectableText> {
+  Timer? _timer;
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _onSelectionChanged(TextSelection selection, SelectionChangedCause? cause) {
+    _timer?.cancel();
+    if (selection.isCollapsed ||
+        selection.start < 0 ||
+        selection.end > widget.text.length) {
+      return;
+    }
+    final word = sanitizeLookupWord(
+        widget.text.substring(selection.start, selection.end));
+    if (word == null || word.isEmpty) return;
+    _timer = Timer(const Duration(milliseconds: 300), () {
+      if (!mounted) return;
+      showDictionarySheet(context, ref, word);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => SelectableText(
+        widget.text,
+        style: widget.style,
+        onSelectionChanged: _onSelectionChanged,
+      );
 }
 
 // --- office search sheet ------------------------------------------------------

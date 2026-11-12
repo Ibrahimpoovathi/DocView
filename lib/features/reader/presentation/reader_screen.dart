@@ -15,6 +15,7 @@ import '../domain/viewer_prefs.dart';
 import 'reflow_screen.dart';
 import 'office_screens.dart';
 import 'reader_chrome.dart';
+import '../../dictionary/presentation/dictionary_sheet.dart';
 
 /// Manual (not codegen): drift data-class generics break riverpod_generator.
 final docByIdProvider = FutureProvider.family<Document?, int>(
@@ -309,6 +310,33 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                     _searcher!
                         .startTextSearch(batterySearchTerm, caseInsensitive: true);
                   }
+                  if (batteryHook && batteryDictWord.isNotEmpty) {
+                    Future.delayed(const Duration(milliseconds: 800), () {
+                      if (mounted) {
+                        showDictionarySheet(context, ref, batteryDictWord);
+                      }
+                    });
+                  }
+                },
+                textSelectionParams: const pdfrx.PdfTextSelectionParams(
+                  showContextMenuAutomatically: true,
+                ),
+                customizeContextMenuItems: (params, items) {
+                  if (!params.textSelectionDelegate.hasSelectedText) return;
+                  items.insert(
+                    0,
+                    ContextMenuButtonItem(
+                      label: 'Dictionary',
+                      onPressed: () async {
+                        final text =
+                            await params.textSelectionDelegate.getSelectedText();
+                        await params.textSelectionDelegate.clearTextSelection();
+                        params.dismissContextMenu();
+                        if (!mounted) return;
+                        await showDictionarySheet(context, ref, text);
+                      },
+                    ),
+                  );
                 },
               ),
             ),

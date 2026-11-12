@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 abstract final class AppPaths {
   static Directory? _books;
   static Directory? _covers;
+  static Directory? _dicts;
 
   static Future<void> init() async {
     final support = await getApplicationSupportDirectory();
@@ -19,6 +20,7 @@ abstract final class AppPaths {
   static void initForTest(Directory support) {
     _books = Directory(p.join(support.path, 'books'))..createSync(recursive: true);
     _covers = Directory(p.join(support.path, 'covers'))..createSync(recursive: true);
+    _dicts = Directory(p.join(support.path, 'dicts'))..createSync(recursive: true);
   }
 
   static Directory get booksDir =>
@@ -26,6 +28,10 @@ abstract final class AppPaths {
 
   static Directory get coversDir =>
       _covers ?? (throw StateError('AppPaths.init() not called'));
+
+  /// User-imported StarDict dictionaries, one subdirectory per dictionary.
+  static Directory get dictsDir =>
+      _dicts ?? (throw StateError('AppPaths.init() not called'));
 
   static String bookFilePath(String uuid, String originalName) => p.join(
         booksDir.path,

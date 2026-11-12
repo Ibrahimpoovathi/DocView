@@ -73,6 +73,17 @@ class BookServer {
               fallback: 'application/octet-stream'));
     });
 
+    router.get('/dicts/<path|.*>', (Request req) async {
+      final file = _inside(AppPaths.dictsDir, req.params['path'] ?? '');
+      if (file == null || !await file.exists()) {
+        return Response.notFound('not found');
+      }
+      return _ok(
+          await file.readAsBytes(),
+          _contentTypeFor(file.path,
+              fallback: 'application/octet-stream'));
+    });
+
     router.get('/txt/<path|.*>', (Request req) async {
       // Plain text — convert to a generated EPUB on the fly (cached).
       final file = _inside(AppPaths.booksDir, req.params['path'] ?? '');

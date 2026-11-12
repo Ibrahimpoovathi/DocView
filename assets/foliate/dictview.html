@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>dictview</title>
+</head>
+<body>
+<script type="module">
+// Hidden dictionary engine page. Loads a user-imported StarDict
+// dictionary (already converted to a plain .dict.flat by the Dart side)
+// from the BookServer and answers word lookups.
+//
+// Bridge:
+//   Flutter -> window.dictLookup(id, word)
+//   JS -> notify('onDictReady', { bookName, count })
+//   JS -> notify('onDictResult', { id, ok, text?, error? })
+
+const notify = (name, payload) =>
+  window.flutter_inappwebview?.callHandler?.(name, payload)
+
+const decoder = new TextDecoder()
+const decode = decoder.decode.bind(decoder)
+
+const strcmp = (a, b) => {
+  a = a.toLowerCase()
+  b = b.toLowerCase()
+  return a < b ? -1 : a > b ? 1 : 0
+}
+
+let state = null
+
+const stripHtml = html => html
+  .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, '')
+  .replace(/<[^>]+>/g, '')
+  .replace(/&nbsp;/g, ' ')
+  .replace(/&lt;/g, '<')
+  .replace(/&gt;/g, '>')
+  .replace(/&amp;/g, '&')
+  .trim()
+
+const decodeArticle = (bytes, seq) => {
+  const text = decode(bytes)
+  if (seq === 'h' || seq === 'x') return stripHtml(text)
+  return text
+}
+
+async function loadDict(name) {
+  const base = `/dicts/${name}/dict`
+  const ifo = decode(await (await fetch(`${base}.ifo`)).arrayBuffer())
+  const fields = Object.fromEntries(ifo
+    .split('\n')
+    .map(line => {
+      const sep = line.indexOf('=')
+      return sep > 0 ? [line.slice(0, sep), line.slice(sep + 1)] : null
+    })
+    .filter(Boolean))
+
+  const seq = (fields.sametypesequence || 'm')[0]
+  const idx = new Uint8Array(await (await fetch(`${base}.idx`)).arrayBuffer())
+  const view = new DataView(idx.buffer)
+  const words = []
+  for (let i = 0; i < idx.length;) {
+    const end = idx.indexOf(0, i)
+    if (end < 0) break
+    words.push({
+      word: decode(idx.subarray(i, end)),
+      offset: view.getUint32(end + 1),
+      size: view.getUint32(end + 5),
+    })
+    i = end + 9
+  }
+
+  // The whole dict data is loaded lazily on the first lookup; StarDict
+  // dictionaries of typical size (10-50 MB) fit comfortably.
+  let bufPromise = null
+  const buf = () => (bufPromise ??= fetch(`${base}.dict.flat`).then(r => r.arrayBuffer()))
+
+  state = { seq, words, buf }
+
+  notify('onDictReady', {
+    bookName: fields.bookname ?? name,
+    count: words.length,
+  })
+}
+
+// Same binary-search semantics as foliate's dict.js (case-insensitive on an
+// already-sorted .idx), plus adjacent-duplicate collection.
+const bisect = (query, start = 0, end = state.words.length - 1) => {
+  const words = state.words
+  if (end - start === 1) {
+    if (!strcmp(query, words[start].word)) return start
+    if (!strcmp(query, words[end].word)) return end
+    return null
+  }
+  const mid = Math.floor(start + (end - start) / 2)
+  const cmp = strcmp(query, words[mid].word)
+  if (cmp < 0) return bisect(query, start, mid)
+  if (cmp > 0) return bisect(query, mid, end)
+  return mid
+}
+
+const checkAdjacent = (query, i) => {
+  if (i == null) return []
+  const wordAt = j => (state.words[j] ? state.words[j].word : null)
+  const equals = j => wordAt(j) ? strcmp(query, wordAt(j)) === 0 : false
+  let j = i
+  while (equals(j - 1)) j--
+  let k = i
+  while (equals(k + 1)) k++
+  return j === k ? [i] : Array.from({ length: k + 1 - j }, (_, n) => j + n)
+}
+
+window.dictLookup = async (id, query) => {
+  try {
+    if (!state) {
+      notify('onDictResult', { id, ok: false, error: 'no dictionary loaded' })
+      return
+    }
+    const indices = checkAdjacent(query.trim(), bisect(query.trim()))
+    const buf = await state.buf()
+    const parts = []
+    for (const i of indices) {
+      const w = state.words[i]
+      const bytes = new Uint8Array(buf, w.offset, w.size)
+      parts.push(decodeArticle(bytes, state.seq))
+    }
+    notify('onDictResult', { id, ok: true, text: parts.join('\n\n') })
+  } catch (e) {
+    notify('onDictResult', { id, ok: false, error: String(e?.message ?? e) })
+  }
+}
+
+const params = new URLSearchParams(location.search)
+const name = params.get('name')
+if (name) {
+  loadDict(name).catch(e =>
+    notify('onDictError', String(e?.message ?? e)))
+} else {
+  notify('onDictError', 'no dictionary name in URL')
+}
+</script>
+</body>
+</html>

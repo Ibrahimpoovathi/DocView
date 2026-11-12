@@ -1,5 +1,6 @@
 import 'package:go_router/go_router.dart';
 
+import '../../features/dictionary/presentation/settings_screen.dart';
 import '../../features/library/presentation/library_screen.dart';
 import '../../features/reader/presentation/reader_screen.dart';
 
@@ -17,12 +18,20 @@ const batteryOpenFormat = String.fromEnvironment('DOCVIEW_BATTERY_OPEN');
 /// opens (`--dart-define=DOCVIEW_BATTERY_SEARCH=word`). Empty disables it.
 const batterySearchTerm = String.fromEnvironment('DOCVIEW_BATTERY_SEARCH');
 
+/// Battery-only: word auto-looked-up in the dictionary popup when a reader
+/// opens (`--dart-define=DOCVIEW_BATTERY_DICT=word`). Empty disables it.
+const batteryDictWord = String.fromEnvironment('DOCVIEW_BATTERY_DICT');
+
 final router = GoRouter(
   initialLocation: '/library',
   routes: [
     GoRoute(
       path: '/library',
       builder: (context, state) => const LibraryScreen(),
+    ),
+    GoRoute(
+      path: '/settings',
+      builder: (context, state) => const SettingsScreen(),
     ),
     GoRoute(
       path: '/reader/:docId',

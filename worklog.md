@@ -419,3 +419,87 @@ sanitizer, epub spine + docx paragraph extraction, findTextHits).
 
 Open next: Phase 6 — dictionary popup (offline + online) or WebDAV
 sync; git init still pending (offered every phase).
+
+## 2026-11-12 — Phase 6 done (0.7.0+7)
+
+Phase 6 = dictionary popup (user-approved reordering: WebDAV sync moves
+to Phase 7). Scope decided up front: bottom-sheet popup everywhere,
+DOCX deferred (no selection callback in docx_file_viewer without a
+fork), offline = user-imported StarDict.
+
+### Lookup service + popup
+
+- `dictionary_service.dart`: dictionaryapi.dev parser (phonetic +
+  meanings/definitions, tolerant of empty alternates), `OnlineDictionary`
+  (8 s timeout, all failures → null), `LookupHistory` in
+  shared_preferences (dedup case-insensitive, 30 cap).
+- `dictionary_sheet.dart`: bottom sheet (DraggableScrollableSheet,
+  Dv tokens) — loading, empty, offline article (pre-wrap + source
+  badge), online article (phonetics + POS chips + italic examples);
+  history records real hits only.
+
+### Selection capture
+
+- PDF: pdfrx selection is built-in (`PdfTextSelectionParams`); added
+  `showContextMenuAutomatically` + `customizeContextMenuItems` with a
+  "Dictionary" item (getSelectedText → clearTextSelection → sheet).
+- Reflow: `docview.html` hooks `selectionchange` on every section doc
+  (attached in the renderer `load` event — foliate swaps iframes per
+  section), debounced 350 ms, `onReflowSelection` → single-word
+  selections auto-open the sheet.
+- ODT/RTF/PPTX: `_DictSelectableText` wrapper over `SelectableText`
+  (`onSelectionChanged`; note the Flutter-3.47 callback signature has a
+  nullable `SelectionChangedCause`).
+- DOCX: excluded (package exposes no hook) — documented limitation.
+
+### Offline StarDict (the spike that mattered)
+
+- Vendored `ext/fflate.js` exports only `unzlibSync` — it cannot
+  inflate gzip, so dict.js's DictZip path is unusable in our WebView.
+  Solution: decompress `.dict.dz` **in Dart at import time**
+  (`dict_zip.dart`: parse the FEXTRA 'RA' chunk table, `gzip.decode`
+  each chunk — every chunk is a standalone gzip member; decompressed
+  offsets equal the .idx offsets, so the index stays valid).
+- `dict_registry.dart`: per-dict dirs under `<appSupport>/dicts/<id>/`
+  (`.ifo/.idx/.dict.flat`), registry JSON in shared_preferences,
+  import/remove/register; Settings screen (drawer stub → real page)
+  imports via file_picker's `pickFileAndDirectoryPaths` and lists/
+  removes dictionaries + online-fallback toggle.
+- `dictview.html` (new foliate asset): parses .ifo/.idx, lazily loads
+  the whole plain `.dict.flat`, binary-searches like foliate's dict.js
+  (case-insensitive strcmp + adjacent duplicates), decodes articles per
+  `sametypesequence` ('m' plain, 'h'/'x' html-stripped).
+- `dict_engine.dart`: hidden 1×1 WebView engine + controller (load
+  dedup, request-id completers); the sheet mounts it in a Stack.
+- foliate assets now install via a version-stamped `installed.marker`
+  (`foliateAssetsVersion = '6'`) so new assets reach existing installs.
+
+### Bugs found by battery (all fixed + verified)
+
+1. **shared_preferences 2.5.x Android jnigen crash** —
+   `NoSuchMethodError` on `SharedPreferencesApiRegistrar.getAll`; the
+   dep existed since Phase 0 but was never exercised. Pinned
+   `shared_preferences_android: 2.4.28` (classic Pigeon channel) via
+   `dependency_overrides`.
+2. `DictRegistry.register`/`LookupHistory.record` crashed on the
+   empty-list `const []` trap (same lesson as the FTS phase — never
+   mutate a `recent()`/`list()` return directly).
+3. `DictEngine` returned a `Positioned` under an `Align` (not a Stack)
+   → applyParentData crash; root is now a plain 1×1 SizedBox.
+4. Offline lookups silently fell back to online in the PDF battery:
+   foliate assets were never installed outside reflow — the engine now
+   calls `installFoliateAssets()` before first load.
+
+Battery: PDF+dict (`battery` → offline hit, badge `Offline (Battery
+Seed)`), EPUB+dict (`silver` → offline hit), online-fallback run
+(phonetics + definitions from dictionaryapi.dev) — plus the standard
+baseline: all 4 AVDs FATAL- and ANR-free.
+
+Tests: 49/49 (16 new: dictionary parser/history/online, dictzip
+round-trip incl. a synthetic dictzip builder, ifo parsing, article
+decoding). `flutter analyze` 0 issues. Releases/DocView.apk rebuilt:
+arm64 0.7.0+7 ≈ 32.8 MB. Commits handled by the user (approval-gated).
+
+Open next: Phase 7 — WebDAV sync (settings + credential storage,
+upload/download of books, delta-sync of documents/reading positions/
+notes, redirect-fork watch for webdav_client), or polish items.

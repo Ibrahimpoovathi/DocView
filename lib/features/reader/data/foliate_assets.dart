@@ -9,11 +9,16 @@ import 'book_server.dart';
 /// Installs the bundled foliate-js tree into the app sandbox and tells the
 /// BookServer where to serve it from. Cheap to call repeatedly (no-ops after
 /// first success).
+/// Bump when bundled foliate assets change so existing installs refresh.
+const foliateAssetsVersion = '6';
+
 Future<void> installFoliateAssets() async {
   final rootDir =
       Directory(p.join(AppPaths.booksDir.parent.path, 'foliate'));
   final doneMarker = File(p.join(rootDir.path, 'installed.marker'));
-  if (!await doneMarker.exists()) {
+  final alreadyInstalled = await doneMarker.exists() &&
+      (await doneMarker.readAsString()) == foliateAssetsVersion;
+  if (!alreadyInstalled) {
     final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
     final assets = manifest
         .listAssets()
@@ -31,7 +36,7 @@ Future<void> installFoliateAssets() async {
       await file.parent.create(recursive: true);
       await file.writeAsBytes(bytes, flush: true);
     }
-    await doneMarker.create();
+    await doneMarker.writeAsString(foliateAssetsVersion, flush: true);
   }
   BookServer.useFoliateDirectory(rootDir);
 }

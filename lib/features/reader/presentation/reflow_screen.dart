@@ -17,6 +17,7 @@ import '../../../core/storage/database.dart';
 import '../data/book_server.dart';
 import '../data/foliate_assets.dart';
 import '../../library/presentation/providers.dart';
+import '../../dictionary/presentation/dictionary_sheet.dart';
 import 'reader_chrome.dart';
 import '../domain/viewer_prefs.dart';
 
@@ -252,6 +253,15 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
 
   static String _jsonStr(String s) => "'${s.replaceAll("'", r"\'")}'";
 
+  // --- dictionary lookup -----------------------------------------------------
+
+  Timer? _dictDebounce;
+
+  Future<void> _openDictionary(String word) async {
+    if (!mounted) return;
+    await showDictionarySheet(context, ref, word);
+  }
+
   // --- in-document search ----------------------------------------------------
 
   void _openSearch() {
@@ -462,6 +472,33 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
                               _searchCtrl.text = batterySearchTerm;
                               _onSearchQuery(batterySearchTerm);
                             }
+                            if (batteryHook && batteryDictWord.isNotEmpty) {
+                              _dictDebounce?.cancel();
+                              _dictDebounce = Timer(
+                                const Duration(milliseconds: 800),
+                                () => _openDictionary(batteryDictWord),
+                              );
+                            }
+                          },
+                        );
+                        c.addJavaScriptHandler(
+                          handlerName: 'onReflowSelection',
+                          callback: (args) {
+                            if (!mounted) return;
+                            final payload = args.isNotEmpty
+                                ? args.first as Map
+                                : const <String, dynamic>{};
+                            final text = payload['text'] as String? ?? '';
+                            if (text.isEmpty) return;
+                            // Single-word selections open the dictionary;
+                            // longer selections are probably copy-flows.
+                            final word = sanitizeLookupWord(text);
+                            if (word == null || word.isEmpty) return;
+                            _dictDebounce?.cancel();
+                            _dictDebounce = Timer(
+                              const Duration(milliseconds: 300),
+                              () => _openDictionary(word),
+                            );
                           },
                         );
                         c.addJavaScriptHandler(

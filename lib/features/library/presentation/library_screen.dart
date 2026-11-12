@@ -23,6 +23,7 @@ import '../../../core/design/widgets/skeleton.dart';
 import '../../../core/storage/database.dart';
 import '../domain/library_query.dart';
 import '../data/import_service.dart';
+import '../../dictionary/data/battery_seed_dict.dart';
 import 'doc_options_sheet.dart';
 import 'providers.dart';
 
@@ -78,6 +79,9 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
     // Battery runs can pin a specific seed format (DOCVIEW_BATTERY_OPEN).
     // 'none' imports only (library-search batteries); default: office first.
     if (batteryOpenFormat.toLowerCase() == 'none') return;
+    if (batteryDictWord.isNotEmpty) {
+      await seedBatteryStarDict();
+    }
     final docs = await ref
         .read(libraryRepositoryProvider)
         .watchLibrary(const LibraryQuery())
@@ -970,7 +974,10 @@ class _ToolsDrawer extends StatelessWidget {
             DvSheetTile(
               icon: Icons.settings_outlined,
               label: 'Settings',
-              onTap: () => Navigator.pop(context),
+              onTap: () {
+                Navigator.pop(context);
+                context.push('/settings');
+              },
             ),
           ],
         ),

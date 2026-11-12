@@ -95,7 +95,25 @@ const open = async () => {
     const $style = doc.createElement('style')
     $style.textContent = pageCSS()
     doc.head.append($style)
+    attachSelectionBridge(doc)
   })
+
+  // Text selection → dictionary lookup bridge. foliate renders each section
+  // into its own document (iframe contentDoc), so the hook must be attached
+  // per 'load' event. Debounced: selectionchange fires continuously while
+  // dragging; the settled selection is what reaches Flutter.
+  const attachSelectionBridge = doc => {
+    if (doc.__docviewSelectionHooked) return
+    doc.__docviewSelectionHooked = true
+    doc.addEventListener('selectionchange', () => {
+      clearTimeout(doc.__docviewSelTimer)
+      doc.__docviewSelTimer = setTimeout(() => {
+        const sel = doc.getSelection?.()
+        const text = sel ? String(sel) : ''
+        if (text) notify('onReflowSelection', { text })
+      }, 350)
+    })
+  }
 
   view.addEventListener('relocate', ({ detail }) => {
     notify('onReflowProgress', {
