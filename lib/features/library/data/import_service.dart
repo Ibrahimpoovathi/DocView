@@ -91,25 +91,31 @@ class ImportService {
   }
 
   /// Background: resolve real metadata + cover, patch the row.
+  /// Best-effort — a failing extractor must never crash the zone (this runs
+  /// unawaited off the import path).
   Future<void> _enrich(int id, DocFormat format, String storedPath) async {
-    final meta = await _meta.extract(format, storedPath).timeout(
-          const Duration(seconds: 25),
-          onTimeout: () => const DocMeta(),
-        );
-    String? coverPath;
-    if (meta.coverPngJpg != null) {
-      final doc = await _repo.byId(id);
-      if (doc == null) return;
-      coverPath = AppPaths.coverFilePath(doc.uuid);
-      await File(coverPath).writeAsBytes(meta.coverPngJpg!);
+    try {
+      final meta = await _meta.extract(format, storedPath).timeout(
+            const Duration(seconds: 25),
+            onTimeout: () => const DocMeta(),
+          );
+      String? coverPath;
+      if (meta.coverPngJpg != null) {
+        final doc = await _repo.byId(id);
+        if (doc == null) return;
+        coverPath = AppPaths.coverFilePath(doc.uuid);
+        await File(coverPath).writeAsBytes(meta.coverPngJpg!);
+      }
+      await _repo.updateFields(
+        id,
+        title: meta.title,
+        author: meta.author,
+        pageCount: meta.pageCount,
+        coverPath: coverPath,
+      );
+    } on Object {
+      // Enrichment is cosmetic; the import row stays as inserted.
     }
-    await _repo.updateFields(
-      id,
-      title: meta.title,
-      author: meta.author,
-      pageCount: meta.pageCount,
-      coverPath: coverPath,
-    );
   }
 }
 

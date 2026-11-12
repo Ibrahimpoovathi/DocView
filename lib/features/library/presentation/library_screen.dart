@@ -13,7 +13,6 @@ import 'package:go_router/go_router.dart';
 
 
 import '../../../app/router.dart';
-
 import '../../../core/format/doc_format.dart';
 import '../../../core/design/dv.dart';
 import '../../../core/design/widgets/doc_card.dart';
@@ -24,6 +23,8 @@ import '../../../core/storage/database.dart';
 import '../domain/library_query.dart';
 import '../data/import_service.dart';
 import '../../dictionary/data/battery_seed_dict.dart';
+import '../../sync/data/webdav_sync.dart';
+import '../../sync/presentation/sync_providers.dart';
 import 'doc_options_sheet.dart';
 import 'providers.dart';
 
@@ -43,6 +44,13 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
     super.initState();
     unawaited(ref.read(textIndexRepositoryProvider).runPending());
     if (batteryHook) unawaited(_batterySeed());
+    // Battery sync: configure the account from the define, then boot-sync
+    // (push on a data device, pull/restore on a cleared one).
+    if (batteryHook && batterySyncUrl.isNotEmpty) {
+      unawaited(_batterySyncSetup());
+    }
+    // Auto-sync on boot (only when a WebDAV account is configured).
+    unawaited(_autoSync());
     if (batteryHook && batterySearchTerm.isNotEmpty) {
       // Battery: exercise the FTS library-search path end to end.
       setState(() {
@@ -62,6 +70,13 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
   /// through the real pipeline and deep-open the first office doc — Phase 4
   /// exercises the new readers.
   Future<void> _batterySeed() async {
+    // Idempotent across boots: the generated seeds embed zip timestamps, so
+    // their sha256 differs per boot — skip when a previous generation is
+    // already in the library (prevents boot-2 duplicates during sync runs).
+    final already = await ref.read(appDatabaseProvider).customSelect(
+          "SELECT COUNT(*) c FROM documents WHERE original_name = 'mini.pdf'",
+        ).getSingle();
+    if ((already.data['c'] as int?) != 0) return;
     final data = await rootBundle.load('assets/battery/mini.pdf');
     final summary = await ref.read(importServiceProvider).importBytes(
           {
@@ -360,10 +375,93 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
         SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
       );
     }
+    // Auto-sync new imports (silently; failure shows a snackbar).
+    unawaited(_autoSync());
   }
 
-  void _openDoc(Document doc) {
+  /// Battery sync hook: persist the define-provided account into secure
+  /// storage before the boot auto-sync kicks in.
+  Future<void> _batterySyncSetup() async {
+    await ref.read(webdavAccountStoreProvider.notifier).save(WebdavAccount(
+          url: batterySyncUrl,
+          user: 'docview',
+          password: 'docview',
+        ));
+  }
+
+  /// Boot auto-sync: runs silently when an account exists; failures surface
+  /// as a snackbar, successes stay quiet.
+  Future<void> _autoSync({bool announce = false}) async {
+    final account = await ref.read(webdavAccountStoreProvider.future);
+    if (account == null || !mounted) return;
+    final message = await ref.read(syncRunnerProvider.notifier).run();
+    if (!mounted || message == null) return;
+    if (announce || message.startsWith('Sync failed')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+      );
+    }
+  }
+
+  Future<void> _syncNow() async {
+    final message = await ref.read(syncRunnerProvider.notifier).run();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message ?? 'Set up WebDAV sync in Settings first.'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  Future<void> _openDoc(Document doc) async {
+    // Cloud-only doc (synced metadata but no local file): download first.
+    final file = File(doc.storedPath);
+    final fileExists = await file.exists();
+    final startMessenger = mounted ? ScaffoldMessenger.of(context) : null;
+    if (!fileExists) {
+      final engine = ref.read(syncEngineProvider);
+      if (engine == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text(
+              '"${doc.title}" is in your synced library only — set up '
+              'WebDAV sync in Settings to download it here.'),
+        ));
+        return;
+      }
+      startMessenger?.showSnackBar(SnackBar(
+        behavior: SnackBarBehavior.floating,
+        content: Text('Downloading "${doc.title}"…'),
+      ));
+      try {
+        final ok = await engine.downloadBook(doc);
+        if (!mounted) return;
+        final messenger = ScaffoldMessenger.of(context);
+        messenger.hideCurrentSnackBar();
+        if (!ok) {
+          messenger.showSnackBar(SnackBar(
+            behavior: SnackBarBehavior.floating,
+            content: Text('"${doc.title}" is not on the sync server.'),
+          ));
+          return;
+        }
+        // Re-index the freshly landed body text in the background.
+        unawaited(ref.read(textIndexRepositoryProvider).runPending());
+      } on Object catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(
+            behavior: SnackBarBehavior.floating,
+            content: Text('Download failed: $e'),
+          ));
+        return;
+      }
+    }
     ref.read(libraryRepositoryProvider).markOpened(doc.id);
+    if (!mounted) return;
     context.push('/reader/${doc.id}');
   }
 
@@ -491,6 +589,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
           Navigator.pop(context);
           _import(asFolder: true);
         },
+        onSyncNow: _syncNow,
       ),
     );
   }
@@ -785,6 +884,14 @@ class _DocList extends StatelessWidget {
                                   )
                                 : _listPh(cs),
                           ),
+                          if (!File(d.storedPath).existsSync()) ...[
+                            const SizedBox(width: Dv.sp8),
+                            Icon(
+                              Icons.cloud_download_outlined,
+                              size: 18,
+                              color: cs.primary,
+                            ),
+                          ],
                           const SizedBox(width: Dv.sp12),
                           Expanded(
                             child: Column(
@@ -937,10 +1044,12 @@ class _ToolsDrawer extends StatelessWidget {
   const _ToolsDrawer({
     required this.onImportFiles,
     required this.onImportFolder,
+    required this.onSyncNow,
   });
 
   final VoidCallback onImportFiles;
   final VoidCallback onImportFolder;
+  final VoidCallback onSyncNow;
 
   @override
   Widget build(BuildContext context) {
@@ -969,6 +1078,11 @@ class _ToolsDrawer extends StatelessWidget {
               icon: Icons.folder_open_outlined,
               label: 'Import folder…',
               onTap: onImportFolder,
+            ),
+            DvSheetTile(
+              icon: Icons.sync_rounded,
+              label: 'Sync now',
+              onTap: onSyncNow,
             ),
             const Divider(),
             DvSheetTile(

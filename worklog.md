@@ -503,3 +503,66 @@ arm64 0.7.0+7 ≈ 32.8 MB. Commits handled by the user (approval-gated).
 Open next: Phase 7 — WebDAV sync (settings + credential storage,
 upload/download of books, delta-sync of documents/reading positions/
 notes, redirect-fork watch for webdav_client), or polish items.
+
+---
+
+## Phase 7 — WebDAV sync (0.8.0+8)
+
+**Decision set (user-approved):** manifest-based reconcile (no migration
+to a change-log); skip notes sync (no notes feature exists yet); books
+sync on demand only; identity = sha256 (uuid is generated per-device —
+`_uuid()` uses a timestamp suffix — so remote uuids are adopted on
+insert). `webdav_client` 1.2.2 turned out dead (pins ancient `xml`,
+conflicts with our ^7.0.1) → `webdav_client_plus` 3.0.0 (maintained
+fork, same API family, Basic/Digest). Credentials in
+`flutter_secure_storage` 11.2.0.
+
+**Schema v5**: `Documents.updatedAt` (nullable) for metadata LWW —
+nullable so `ALTER TABLE ADD COLUMN` works; null = pre-v5 = oldest.
+Repository stamps `updatedAt` on every mutation. Drift stores DateTime
+at second precision → ties are real; **tombstone ties are
+deletion-dominant** (a device must never resurrect its own just-deleted
+doc from its own earlier manifest push — this exact bug showed up in
+tests and is the reason ties don't default to local).
+
+**Server layout** (`<base>/DocView/`): `manifest.json` (documents with
+tombstones, positions, collections/tags + name links), content-addressed
+`books/<sha256>__<origName>` (origName recovered on pull so storedPath/
+fileType survive a device switch), `covers/<sha256>.jpg`. Sync =
+ensureDirs → readManifest (404→null) → listBooks/listCoverShas →
+pull-reconcile (transaction) → push (writeManifest last). Cloud-only
+docs are metadata rows with planned `storedPath`/`coverPath` but no
+file: `textIndexed=1` + empty-body FTS row keeps titles/author search
+working; opening one goes through the `_openDoc` download gate (cloud
+badge on cards) → `downloadBook` writes the file, resets `textIndexed`,
+re-runs the FTS indexer, then opens.
+
+**Files**: `lib/features/sync/data/{webdav_sync,sync_manifest,
+sync_engine}.dart`, `lib/features/sync/presentation/sync_providers.dart`
+(SyncRunner is `keepAlive` — autoDispose disposed its ref mid-run:
+"Cannot use the Ref of syncRunnerProvider after it has been disposed";
+`ref.mounted` guards after awaits). UI: Settings "WebDAV sync" section
+(connect & test, sync now, download all, remove), drawer "Sync now",
+cloud badges (DocCard overlay + list tiles), auto-sync at boot and after
+imports (silent, failure → snackbar). `_enrich` (metadata enrichment)
+wrapped in try/catch — garbage bytes threw unawaited and killed test
+zones.
+
+**Tests: 55/55** (6 new in `test/sync_test.dart` against an in-memory
+fake WebDAV: push/restore with uuid adoption, no-op second run, position
+LWW both directions incl. stale-manifest protection, tombstones, and
+collection/tag merge). `flutter analyze` 0 issues.
+
+**Battery** (pixel_7, host `wsgidav` 4.4.0 anonymous on :8080 →
+`/tmp/opencode/dav`, emulator at `10.0.2.2`; `DOCVIEW_BATTERY_SYNC`
+define auto-configures the account; seeds are idempotent across boots —
+they embed zip timestamps so sha256 dedupe alone would duplicate them):
+push run (8 books + manifest uploaded), restore run (`pm clear` → pull
+repopulates metadata + covers, `Library · 13` after local seed merge),
+on-demand open (tap badged cloud card → download → PPTX reader opens) —
+0 FATAL each. Baseline battery re-run: **all 4 AVDs FATAL- and
+ANR-free**.
+
+Releases/DocView.apk rebuilt: arm64 0.8.0+8 ≈ 33.2 MB. Open next:
+Phase 8 polish (big-library perf, tablet 2-pane, notes/highlights +
+export) or whatever the user picks.

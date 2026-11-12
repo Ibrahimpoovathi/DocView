@@ -14,12 +14,14 @@ optional user-owned WebDAV sync.
 | 3 | Reflow readers (foliate-js: EPUB/MOBI/AZW3/FB2/TXT, CBZ pager, themes) | Done |
 | 4 | Office: DOCX native, XLSX tables, PPTX/DOC/ODT/RTF text-first | Done |
 | 5 | Search (in-doc + library FTS5), dictionary popup (offline + online) | Done |
-| 6 | WebDAV sync (books + progress + notes/collections, on-demand download) | Planned |
-| 7 | Polish: big-library perf, tablet 2-pane, notes export, release pipeline | Planned |
+| 6 | Dictionary popup (offline StarDict + online fallback, tap-to-lookup) | Done |
+| 7 | WebDAV sync (books + progress + collections, on-demand download) | Done |
+| 8 | Polish: big-library perf, tablet 2-pane, notes/highlights + export | Planned |
 
-Current build: **0.7.0** (Phases 0–6: shell, library, PDF reader, reflow
+Current build: **0.8.0** (Phases 0–7: shell, library, PDF reader, reflow
 readers, office readers, search — in-doc + FTS5 library full-text,
-dictionary popup — offline StarDict + online). See [STUDY.md](STUDY.md) for the
+dictionary popup — offline StarDict + online, WebDAV sync — manifest
+reconcile, on-demand downloads). See [STUDY.md](STUDY.md) for the
 reference-app analysis that drove architecture decisions and [worklog.md](worklog.md)
 for the chronological build log.
 
@@ -85,7 +87,7 @@ cd ~/Applications/OpenCode/DocView
 
 ## Release APK (single artifact, rewritten every update)
 
-- Deliverable: **`releases/DocView.apk`** — arm64-only release build (v0.7.0+7 ≈ 32.8 MB),
+- Deliverable: **`releases/DocView.apk`** — arm64-only release build (v0.8.0+8 ≈ 33.2 MB),
   committed to git; regenerated and *overwritten* at the end of every change.
 - Command to reproduce: `~/flutter/bin/flutter build apk --release --split-per-abi`,
   then copy `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` → `releases/DocView.apk`.
@@ -93,15 +95,17 @@ cd ~/Applications/OpenCode/DocView
   (`app-x86_64-release.apk`) — never committed.
 - Version bumps: pubspec `version` + worklog note each update.
 
-### Test results at current build (0.7.0+7)
+### Test results at current build (0.8.0+8)
 
-Static: `flutter analyze` — 0 issues; `flutter test` — 49/49 pass
+Static: `flutter analyze` — 0 issues; `flutter test` — 55/55 pass
 (format detection, repository CRUD + soft delete + reflow saveProgress,
 import pipeline incl. dedupe-by-sha256, TXT→EPUB converter,
 PPTX/ODT/RTF extractors, empty-library widget test, FTS5 metadata/body
 search + epub/docx text extraction + findTextHits, dictionary parser +
 history + MockClient online lookup, dictzip round-trip + StarDict ifo
-parsing + article decoding).
+parsing + article decoding, sync manifest round-trip + push/pull
+restore + position LWW + tombstones + collection/tag merge against an
+in-memory fake WebDAV).
 
 AVD battery (install, cold launch, screenshot review, FATAL/ANR logcat scan;
 run via `tool/battery_all.sh` → per-AVD `tool/battery_one.sh <avd>`):
@@ -125,10 +129,21 @@ defines — bar opens with the term pre-filled and searches automatically):
 | Dictionary offline · EPUB reflow | `silver` (seeded StarDict) | ✅ popup with offline article |
 | Dictionary online fallback · PDF | `battery` (no offline dict yet) | ✅ popup with dictionaryapi.dev entry |
 
+Sync batteries (single-AVD, `DOCVIEW_BATTERY_SYNC` define; host runs
+`wsgidav` anonymously on :8080 → `/tmp/opencode/dav`, emulator reaches it
+at `10.0.2.2`; script `tool/battery_sync.sh <avd> <push|restore>`):
+
+| Run | Flow | Result |
+|---|---|---|
+| push | fresh install → seeds imported → account auto-configured from define → boot-sync | ✅ server ends with manifest.json + 8 content-addressed books + cover |
+| restore | `pm clear` first (fresh device) → define re-saves account → boot-sync pulls | ✅ library repopulated (metadata + covers), cloud-only docs badged |
+| on-demand open | tap a cloud-badged doc | ✅ file downloads from server, reader opens (PPTX slide list) |
+
 Battery build (`--dart-define=DOCVIEW_BATTERY=true`, optional
 `--dart-define=DOCVIEW_BATTERY_OPEN=<fmt>`, optional
 `--dart-define=DOCVIEW_BATTERY_SEARCH=<term>`, optional
-`--dart-define=DOCVIEW_BATTERY_DICT=<word>`; `OPEN=none` imports the
+`--dart-define=DOCVIEW_BATTERY_DICT=<word>`, optional
+`--dart-define=DOCVIEW_BATTERY_SYNC=<url>`; `OPEN=none` imports the
 seeds but skips the deep-open for library-only batteries) auto-imports a
 bundled `assets/battery/mini.pdf` plus in-memory `battery.epub/txt/docx/
 xlsx/pptx/odt/rtf` through the real pipeline (asset → importBytes →
@@ -186,6 +201,31 @@ jnigen path crashes with `NoSuchMethodError` on
 was never exercised until now). New foliate assets install via a
 version-stamped `installed.marker` (bump `foliateAssetsVersion` when
 bundled assets change).
+
+**Phase 7 notes** (WebDAV sync): manifest-based reconcile — the server
+holds `DocView/manifest.json` (documents with tombstones, reading
+positions, collections/tags + links) plus content-addressed
+`books/<sha256>__<origName>` and `covers/<sha256>.jpg`. Sync runs
+pull → reconcile → push; identity is `sha256` (uuid is NOT stable across
+devices — the timestamp-suffix generator — so remote uuids are adopted
+on insert). Metadata LWW via a new nullable `Documents.updatedAt`
+(schema v5; null = pre-v5 = oldest); positions LWW via the existing
+`ReadingPositions.updatedAt`; **tombstone ties are deletion-dominant**
+(Drift stores DateTime at second precision — sub-second LWW is a tie,
+and a device must never resurrect its own just-deleted doc from its own
+earlier manifest push; that exact bug showed up in tests). Books sync
+on demand: pull inserts metadata-only "cloud" rows (`textIndexed=1` +
+empty-body FTS row so titles stay searchable); opening one downloads
+via the open-gate in `_openDoc` (cloud badge on cards), resets
+`textIndexed`, and re-runs the FTS indexer. Client =
+`webdav_client_plus` 3.0.0 (maintained fork of the dead `webdav_client`
+— same API family, Basic/Digest, updated `xml`); credentials in
+`flutter_secure_storage`. Settings gains a WebDAV sync section
+(connect & test, sync now, download all, remove); the drawer gains
+"Sync now"; auto-sync runs at boot and after imports (silent, failure
+→ snackbar). Battery-only: `DOCVIEW_BATTERY_SYNC=<url>` auto-configures
+the account; battery seeds are idempotent across boots (they embed zip
+timestamps, so sha256 dedupe alone would duplicate them per boot).
 
 **Phase 4 notes**: DOCX = `docx_file_viewer` native widgets (search/zoom/
 selection); XLSX/XLS = `excel_plus` table reader (styled header, sheet

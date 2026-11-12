@@ -22,6 +22,11 @@ const batterySearchTerm = String.fromEnvironment('DOCVIEW_BATTERY_SEARCH');
 /// opens (`--dart-define=DOCVIEW_BATTERY_DICT=word`). Empty disables it.
 const batteryDictWord = String.fromEnvironment('DOCVIEW_BATTERY_DICT');
 
+/// Battery-only: WebDAV sync URL auto-configured at boot
+/// (`--dart-define=DOCVIEW_BATTERY_SYNC=http://10.0.2.2:8080/dav/`).
+/// Credentials are fixed battery dummies; empty disables the sync battery.
+const batterySyncUrl = String.fromEnvironment('DOCVIEW_BATTERY_SYNC');
+
 final router = GoRouter(
   initialLocation: '/library',
   routes: [

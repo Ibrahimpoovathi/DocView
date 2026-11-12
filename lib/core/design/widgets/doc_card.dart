@@ -94,6 +94,24 @@ class DocCard extends StatelessWidget {
                           ],
                         ),
                       ),
+                    // Cloud-only (synced metadata, file not downloaded yet).
+                    if (!File(document.storedPath).existsSync())
+                      Positioned(
+                        top: 6,
+                        left: 6,
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: Colors.black38,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Icon(
+                            Icons.cloud_download_outlined,
+                            size: 16,
+                            color: cs.onPrimary,
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),

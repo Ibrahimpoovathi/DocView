@@ -31,6 +31,11 @@ class Documents extends Table {
   DateTimeColumn get lastOpenedAt => dateTime().nullable()();
   DateTimeColumn get deletedAt => dateTime().nullable()();
 
+  /// Last local metadata mutation (title/author/favourite/delete). Null on
+  /// rows created before v5 — treated as "oldest" in last-writer-wins
+  /// comparisons during WebDAV sync.
+  DateTimeColumn get updatedAt => dateTime().nullable()();
+
   /// 0 = body text not yet pulled into document_fts (background indexer);
   /// 1 = done (regardless of whether any extractable body existed).
   IntColumn get textIndexed => integer().withDefault(const Constant(0))();
@@ -109,7 +114,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase(super.e);
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -131,6 +136,11 @@ class AppDatabase extends _$AppDatabase {
             await m.addColumn(documents, documents.textIndexed);
             await customStatement(ftsCreateSql);
             await customStatement(ftsBackfillSql);
+          }
+          if (from < 5) {
+            // Nullable column: safe ALTER ADD COLUMN, legacy rows stay NULL
+            // (= oldest in sync LWW comparisons until next mutation).
+            await m.addColumn(documents, documents.updatedAt);
           }
         },
       );

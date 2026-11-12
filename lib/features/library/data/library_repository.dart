@@ -143,7 +143,10 @@ class LibraryRepository {
           .getSingleOrNull();
 
   Future<int> insertDocument(DocumentsCompanion entry) async {
-    final id = await _db.into(_db.documents).insert(entry);
+    final stamped = entry.updatedAt.present
+        ? entry
+        : entry.copyWith(updatedAt: Value(DateTime.now()));
+    final id = await _db.into(_db.documents).insert(stamped);
     final row = await (_db.select(_db.documents)
           ..where((d) => d.id.equals(id)))
         .getSingleOrNull();
@@ -177,6 +180,7 @@ class LibraryRepository {
             : Value(coverPath),
         pageCount:
             pageCount == null ? const Value.absent() : Value(pageCount),
+        updatedAt: Value(DateTime.now()),
       ),
     );
   }
@@ -205,11 +209,14 @@ class LibraryRepository {
 
   Future<void> markOpened(int id) =>
       (_db.update(_db.documents)..where((d) => d.id.equals(id)))
-          .write(DocumentsCompanion(lastOpenedAt: Value(DateTime.now())));
+          .write(DocumentsCompanion(
+              lastOpenedAt: Value(DateTime.now()),
+              updatedAt: Value(DateTime.now())));
 
   Future<void> toggleFavourite(int id, bool value) =>
       (_db.update(_db.documents)..where((d) => d.id.equals(id)))
-          .write(DocumentsCompanion(isFavourite: Value(value)));
+          .write(DocumentsCompanion(
+              isFavourite: Value(value), updatedAt: Value(DateTime.now())));
 
   /// Soft-deletes the row and removes its sandbox files. Returns the
   /// export-safe display data first (caller snapshots for undo UI later).
@@ -217,7 +224,9 @@ class LibraryRepository {
     final doc = await byId(id);
     if (doc == null) return;
     await (_db.update(_db.documents)..where((d) => d.id.equals(id)))
-        .write(DocumentsCompanion(deletedAt: Value(DateTime.now())));
+        .write(DocumentsCompanion(
+            deletedAt: Value(DateTime.now()),
+            updatedAt: Value(DateTime.now())));
 
     // Drop the FTS row so deleted bodies never surface in searches.
     await _db.customStatement(
