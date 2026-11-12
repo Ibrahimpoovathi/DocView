@@ -349,3 +349,73 @@ Open next: P4.5 legacy .doc/.ppt (needs an engine decision — revisit
 office_oxide_ffi maturity or an offline_document_viewer bundled option);
 large-sheet lazy rows (streamRows) if real-world workbooks hit the cap;
 Phase 5 search (FTS5 + in-doc).
+
+## 2026-11-10 — Phase 5 done (0.6.0+6)
+
+Format-aware stub for legacy .doc/.ppt (P4.5 dropped — usage data says
+these formats are dying; .xls already covered by excel_plus): readers
+now show conversion guidance ("re-save as .docx/.pptx"). Added the
+missing `ppt` entry to `DocFormat` + detection rule.
+
+### In-doc search (every reader)
+
+- PDF (pdfrx 2.9.0 `PdfTextSearcher`): shared `ReaderSearchBar`
+  (reader_chrome.dart) + match rects painted via
+  `pagePaintCallbacks: [_searcher.pageTextMatchPaintCallback]`.
+  **Crash lesson**: the searcher must be created *after* the document
+  is ready — its constructor subscribes to
+  `controller.document.events` and hits a null check otherwise
+  (`_searcher` is now created in `onViewerReady`, battery hook starts
+  the search there too). Null-aware list element `[?expr]` keeps
+  paint callbacks empty until then.
+- Reflow (foliate-js): `window.docviewSearch/docviewClearSearch`
+  bridge in docview.html (seq-superseded generator, 800-hit cap,
+  excerpt pre/post ±60 chars); Dart side holds hit list + prev/next
+  via `docviewGoTo(cfi)` + a result-list bottom sheet; count-tap opens
+  it. **Lesson**: opening the IME fires the WebView error handler with
+  a benign `ResizeObserver loop` error — the handler now filters it
+  (was falsely killing the reader in battery runs).
+- Office: shared `_OfficeSearchSheet` over `findTextHits`
+  (text_search.dart, case-insensitive, 400-hit cap). xlsx scrolls to
+  the matching row fraction, pptx pushes the slide, odt/rtf scroll to
+  the paragraph; DOCX keeps its native search FAB.
+
+### Library full-text search (FTS5)
+
+- sqlite3_flutter_libs 0.5.42 bundles SQLite 3.52.0 **with fts5** (the
+  emulator's own sqlite3 is irrelevant — verified in tests + battery).
+- Schema v4: `document_fts` virtual table + `textIndexed` column +
+  backfill migration (onUpgrade <4 / onCreate).
+- `text_extract.dart` extracts body text for pdf (pdfrx `loadText()`,
+  500-page cap), epub (container→OPF spine walk, HTML stripped),
+  txt/docx (new `docx_text.dart` extractor), odt/rtf/pptx/xlsx; 1.5 MB
+  cap, all errors swallowed to ''. Non-indexable formats (mobi, cbz,
+  legacy office…) record an empty body — metadata still searchable.
+- `text_index_repository.dart` runs pending extractions in batches of
+  8 on app boot and after each import (reentry-guarded).
+- Search path: `ftsMatchQuery` sanitizer (unicode words → quoted
+  AND-terms, 8 max) → `document_fts MATCH ? ORDER BY bm25(document_fts)`
+  via drift `customSelect`; punctuation-only queries fall back to
+  metadata substring. **FTS5 gotchas**: virtual tables don't support
+  UPSERT (rows are read-preserved, DELETE+INSERT in a transaction) and
+  a table alias can't appear left of `MATCH` or inside `bm25()` —
+  write `document_fts MATCH ?` / `bm25(document_fts)`.
+- Battery additions: `DOCVIEW_BATTERY_SEARCH=<term>` define,
+  `DOCVIEW_BATTERY_OPEN=none` (import seeds, skip deep-open for
+  library-search runs), LibraryScreen boot hook (opens search bar,
+  preloads term).
+
+Battery: baseline all 4 AVDs FATAL-FREE; EPUB reflow search
+(`ribbons` → 1/75 + highlight) and library FTS search (`ribbons`,
+body-only term → Library · 1 EPUB card) on pixel_7; PDF search
+initially hit host stress (grey screens) but the retry exposed a **real
+crash** — the null-document PdfTextSearcher constructor — fixed as
+above, then verified `1/1` FATAL-FREE.
+
+Tests: 33/33 (8 new: FTS metadata/body search, soft-delete exclusion,
+sanitizer, epub spine + docx paragraph extraction, findTextHits).
+`flutter analyze` 0 issues. Releases/DocView.apk rebuilt: arm64
+0.6.0+6 ≈ 32.5 MB.
+
+Open next: Phase 6 — dictionary popup (offline + online) or WebDAV
+sync; git init still pending (offered every phase).

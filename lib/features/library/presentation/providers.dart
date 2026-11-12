@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'dart:io';
 
 import 'package:drift/drift.dart' show LazyDatabase;
@@ -12,6 +14,7 @@ import '../../reader/data/reading_repository.dart';
 import '../data/import_service.dart';
 import '../data/library_repository.dart';
 import '../data/metadata_service.dart';
+import '../data/text_index_repository.dart';
 import '../domain/library_query.dart';
 
 part 'providers.g.dart';
@@ -37,6 +40,10 @@ MetadataService metadataService(Ref ref) => MetadataService();
 @Riverpod(keepAlive: true)
 ImportService importService(Ref ref) =>
     ImportService(ref.watch(libraryRepositoryProvider), ref.watch(metadataServiceProvider));
+
+@Riverpod(keepAlive: true)
+TextIndexRepository textIndexRepository(Ref ref) =>
+    TextIndexRepository(ref.watch(appDatabaseProvider));
 
 /// Library view state (sort/chip/search) + grid-vs-list presentation mode.
 @riverpod
@@ -90,6 +97,8 @@ class ImportRunner extends _$ImportRunner {
     state = importing;
     try {
       final summary = await ref.read(importServiceProvider).importSources(paths);
+      // Kick the background FTS body indexer right after new imports.
+      unawaited(ref.read(textIndexRepositoryProvider).runPending());
       return 'Imported ${summary.added}'
           ' · ${summary.duplicates} duplicates'
           '${summary.failed > 0 ? ' · ${summary.failed} failed' : ''}';

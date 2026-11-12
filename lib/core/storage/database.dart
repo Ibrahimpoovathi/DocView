@@ -30,6 +30,10 @@ class Documents extends Table {
   DateTimeColumn get addedAt => dateTime().clientDefault(() => DateTime.now())();
   DateTimeColumn get lastOpenedAt => dateTime().nullable()();
   DateTimeColumn get deletedAt => dateTime().nullable()();
+
+  /// 0 = body text not yet pulled into document_fts (background indexer);
+  /// 1 = done (regardless of whether any extractable body existed).
+  IntColumn get textIndexed => integer().withDefault(const Constant(0))();
 }
 
 // ---------------------------------------------------------------------------
@@ -84,6 +88,20 @@ class ReadingPositions extends Table {
 // Database
 // ---------------------------------------------------------------------------
 
+/// FTS5 index of the library: one row per non-deleted document, [rowid]
+/// aligned with `documents.id`. `body` holds the extracted full text (may
+/// stay empty for formats we do not extract). Kept in sync by
+/// [LibraryRepository] writes plus the background text indexer.
+const ftsCreateSql =
+    'CREATE VIRTUAL TABLE IF NOT EXISTS document_fts '
+    'USING fts5(title, author, body)';
+
+/// Initial backfill on first creation/upgrade to v4.
+const ftsBackfillSql =
+    "INSERT INTO document_fts(rowid, title, author, body) "
+    "SELECT id, title, COALESCE(author, ''), '' FROM documents "
+    'WHERE deleted_at IS NULL';
+
 @DriftDatabase(tables: [
   Documents, Collections, DocumentCollections, Tags, DocumentTags, ReadingPositions,
 ])
@@ -91,11 +109,16 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase(super.e);
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
-        onCreate: (m) => m.createAll(),
+        onCreate: (m) async {
+          await m.createAll();
+          // FTS5 is available: sqlite3_flutter_libs ships a full SQLite build.
+          await customStatement(ftsCreateSql);
+          await customStatement(ftsBackfillSql);
+        },
         onUpgrade: (m, from, to) async {
           if (from < 2) {
             await m.createTable(readingPositions);
@@ -103,6 +126,11 @@ class AppDatabase extends _$AppDatabase {
           if (from < 3) {
             await m.addColumn(readingPositions, readingPositions.progress);
             await m.addColumn(readingPositions, readingPositions.location);
+          }
+          if (from < 4) {
+            await m.addColumn(documents, documents.textIndexed);
+            await customStatement(ftsCreateSql);
+            await customStatement(ftsBackfillSql);
           }
         },
       );

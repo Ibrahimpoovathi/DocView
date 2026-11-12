@@ -13,12 +13,12 @@ optional user-owned WebDAV sync.
 | 2 | PDF reader (pdfrx: TOC, search, bookmarks, dark/fit modes, progress) | Done |
 | 3 | Reflow readers (foliate-js: EPUB/MOBI/AZW3/FB2/TXT, CBZ pager, themes) | Done |
 | 4 | Office: DOCX native, XLSX tables, PPTX/DOC/ODT/RTF text-first | Done |
-| 5 | Search (in-doc + library FTS5), dictionary popup (offline + online) | Planned |
+| 5 | Search (in-doc + library FTS5), dictionary popup (offline + online) | Done |
 | 6 | WebDAV sync (books + progress + notes/collections, on-demand download) | Planned |
 | 7 | Polish: big-library perf, tablet 2-pane, notes export, release pipeline | Planned |
 
-Current build: **0.5.0** (Phases 0–4: shell, library, PDF reader, reflow
-readers, office readers). See [STUDY.md](STUDY.md) for the
+Current build: **0.6.0** (Phases 0–5: shell, library, PDF reader, reflow
+readers, office readers, search — in-doc + FTS5 library full-text). See [STUDY.md](STUDY.md) for the
 reference-app analysis that drove architecture decisions and [worklog.md](worklog.md)
 for the chronological build log.
 
@@ -84,7 +84,7 @@ cd ~/Applications/OpenCode/DocView
 
 ## Release APK (single artifact, rewritten every update)
 
-- Deliverable: **`releases/DocView.apk`** — arm64-only release build (v0.5.0+5 ≈ 32.5 MB),
+- Deliverable: **`releases/DocView.apk`** — arm64-only release build (v0.6.0+6 ≈ 32.5 MB),
   committed to git; regenerated and *overwritten* at the end of every change.
 - Command to reproduce: `~/flutter/bin/flutter build apk --release --split-per-abi`,
   then copy `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` → `releases/DocView.apk`.
@@ -92,12 +92,13 @@ cd ~/Applications/OpenCode/DocView
   (`app-x86_64-release.apk`) — never committed.
 - Version bumps: pubspec `version` + worklog note each update.
 
-### Test results at current build (0.5.0+5)
+### Test results at current build (0.6.0+6)
 
-Static: `flutter analyze` — 0 issues; `flutter test` — 25/25 pass
+Static: `flutter analyze` — 0 issues; `flutter test` — 33/33 pass
 (format detection, repository CRUD + soft delete + reflow saveProgress,
 import pipeline incl. dedupe-by-sha256, TXT→EPUB converter,
-PPTX/ODT/RTF extractors, empty-library widget test).
+PPTX/ODT/RTF extractors, empty-library widget test, FTS5 metadata/body
+search + epub/docx text extraction + findTextHits).
 
 AVD battery (install, cold launch, screenshot review, FATAL/ANR logcat scan;
 run via `tool/battery_all.sh` → per-AVD `tool/battery_one.sh <avd>`):
@@ -109,13 +110,47 @@ run via `tool/battery_all.sh` → per-AVD `tool/battery_one.sh <avd>`):
 | pixel_7 | 36 | ✅ DOCX renders + resume round-trip; XLSX/PPTX/ODT/RTF verified per-format |
 | pixel_tablet | 36 (landscape) | ✅ DOCX renders |
 
+Search batteries (single-AVD, `DOCVIEW_BATTERY_OPEN` + `DOCVIEW_BATTERY_SEARCH`
+defines — bar opens with the term pre-filled and searches automatically):
+
+| Target | Term | Result |
+|---|---|---|
+| PDF (pdfrx `PdfTextSearcher`) | `Battery` | ✅ count `1/1`, highlight painted |
+| EPUB reflow (foliate-js `view.search`) | `ribbons` | ✅ count `1/75`, result list + hit navigation |
+| Library FTS5 (`document_fts MATCH` + `bm25`) | `ribbons` (body-only) | ✅ Library · 1 — only the EPUB matching *inside* the body |
+
 Battery build (`--dart-define=DOCVIEW_BATTERY=true`, optional
-`--dart-define=DOCVIEW_BATTERY_OPEN=<fmt>`) auto-imports a bundled
-`assets/battery/mini.pdf` plus in-memory `battery.epub/txt/docx/xlsx/
-pptx/odt/rtf` through the real pipeline (asset → importBytes → sandbox
-copy → library row → deep-open reader); the shipped APK never contains
-the hook. Page-turn swipe + force-stop/relaunch resume captured per AVD
-(`<avd>.png` / `<avd>.turn.png` / `<avd>.resume.png`).
+`--dart-define=DOCVIEW_BATTERY_OPEN=<fmt>`, optional
+`--dart-define=DOCVIEW_BATTERY_SEARCH=<term>`; `OPEN=none` imports the
+seeds but skips the deep-open for library-only batteries) auto-imports a
+bundled `assets/battery/mini.pdf` plus in-memory `battery.epub/txt/docx/
+xlsx/pptx/odt/rtf` through the real pipeline (asset → importBytes →
+sandbox copy → library row → deep-open reader); the shipped APK never
+contains the hook. Page-turn swipe + force-stop/relaunch resume captured
+per AVD (`<avd>.png` / `<avd>.turn.png` / `<avd>.resume.png`).
+
+**Phase 5 notes**: In-doc search in every reader — PDF via pdfrx
+`PdfTextSearcher` (match rects painted through `pagePaintCallbacks`;
+the searcher must be created *after* `onViewerReady`, it subscribes to
+`controller.document.events` in its constructor and crashes otherwise);
+reflow via the foliate-js `search.js` bridge (`docviewSearch`/
+`docviewClearSearch` in `docview.html`, result list + prev/next through
+CFI jumps; the `docview.html` error handler filters benign
+`ResizeObserver loop` errors that fire when the IME opens); office
+readers via a shared `findTextHits` text search (docx keeps its native
+search FAB; xlsx scrolls to the row, pptx/odt/rtf jump to slide/
+paragraph). Library search now walks document *bodies* via FTS5:
+SQLite 3.52.0 (bundled by sqlite3_flutter_libs) provides fts5; schema
+v4 adds a `document_fts` virtual table with a backfill migration;
+background extraction (`text_extract.dart`: pdf/epub/txt/docx/odt/rtf/
+pptx/xlsx; FTS5 tables have no UPSERT — rows are read-preserved then
+DELETE+INSERT'd; `f MATCH` fails when `f` is a table alias, use
+`document_fts MATCH ?`) runs on app boot and after imports; the query
+sanitizer quotes terms, caps at 8 words, and falls back to a metadata
+substring LIKE for punctuation-only input. Legacy .doc/.ppt now show a
+conversion-guidance stub screen (re-save as .docx/.pptx); the `ppt`
+format was added to `DocFormat`/detection. Dictionary popup deferred to
+Phase 6.
 
 **Phase 4 notes**: DOCX = `docx_file_viewer` native widgets (search/zoom/
 selection); XLSX/XLS = `excel_plus` table reader (styled header, sheet

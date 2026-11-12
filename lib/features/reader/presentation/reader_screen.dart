@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:pdfrx/pdfrx.dart' as pdfrx;
 
+import '../../../app/router.dart';
 import '../../../core/design/dv.dart';
 import '../../../core/design/widgets/empty_state.dart';
 import '../../../core/format/doc_format.dart';
@@ -13,6 +14,7 @@ import '../../library/presentation/providers.dart';
 import '../domain/viewer_prefs.dart';
 import 'reflow_screen.dart';
 import 'office_screens.dart';
+import 'reader_chrome.dart';
 
 /// Manual (not codegen): drift data-class generics break riverpod_generator.
 final docByIdProvider = FutureProvider.family<Document?, int>(
@@ -51,7 +53,11 @@ class ReaderScreen extends ConsumerStatefulWidget {
 class _ReaderScreenState extends ConsumerState<ReaderScreen>
     with WidgetsBindingObserver {
   final _ctl = pdfrx.PdfViewerController();
-  late final pdfrx.PdfTextSearcher _searcher = pdfrx.PdfTextSearcher(_ctl);
+  // Created only after the document is ready (onViewerReady): PdfTextSearcher
+  // subscribes to controller.document.events in its constructor and crashes
+  // when no document is open yet.
+  pdfrx.PdfTextSearcher? _searcher;
+  bool _batterySearchStarted = false;
 
   Document? _doc;
   bool get _canSave => widget.debugPath == null && _doc != null;
@@ -77,7 +83,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _flushSave();
-    _searcher.dispose();
+    _searcher?.dispose();
     _searchCtrl.dispose();
     super.dispose();
   }
@@ -111,6 +117,14 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       _pageNumber = pos.pageNumber;
       _booting = false;
     });
+    if (batteryHook && batterySearchTerm.isNotEmpty) {
+      // Actual startTextSearch happens in onViewerReady once the searcher
+      // exists; opening the bar early still commits the query text.
+      setState(() {
+        _searchOpen = true;
+        _searchCtrl.text = batterySearchTerm;
+      });
+    }
   }
 
   void _flushSave() {
@@ -184,6 +198,19 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
         case DocFormat.odt:
         case DocFormat.rtf:
           return TextDocScreen(doc: doc);
+        case DocFormat.doc:
+        case DocFormat.ppt:
+          return _ReaderScaffold(
+            child: EmptyState(
+              icon: Icons.auto_stories_rounded,
+              heading: '"${doc.title}"',
+              body: 'Legacy Word/PowerPoint files aren\'t supported in this '
+                  'build. Open the file once in Word, PowerPoint, or '
+                  'LibreOffice and re-save it as .docx/.pptx to read it here.',
+              actionLabel: 'Back',
+              onAction: () => context.pop(),
+            ),
+          );
         case _:
           break;
       }
@@ -220,13 +247,33 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       ),
       body: Column(
         children: [
-          if (_searchOpen)
-            _SearchBar(
-              controller: _searchCtrl,
-              searcher: _searcher,
-              onClose: () {
-                setState(() => _searchOpen = false);
-                _searcher.resetTextSearch();
+          if (_searchOpen && _searcher != null)
+            AnimatedBuilder(
+              animation: _searcher!,
+              builder: (context, _) {
+                final matches = _searcher!.matches;
+                final idx = _searcher!.currentIndex;
+                final countText = matches.isEmpty
+                    ? ''
+                    : '${(idx ?? 0) + 1}/${matches.length}';
+                return ReaderSearchBar(
+                  controller: _searchCtrl,
+                  busy: _searcher!.isSearching && matches.isEmpty,
+                  countText: countText,
+                  onQuery: (v) {
+                    if (v.trim().isEmpty) {
+                      _searcher!.resetTextSearch();
+                      return;
+                    }
+                    _searcher!.startTextSearch(v, caseInsensitive: true);
+                  },
+                  onPrev: () => _searcher!.goToPrevMatch(),
+                  onNext: () => _searcher!.goToNextMatch(),
+                  onClose: () {
+                    setState(() => _searchOpen = false);
+                    _searcher!.resetTextSearch();
+                  },
+                );
               },
             ),
           Expanded(
@@ -239,6 +286,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                     ? const Color(0xFF211D19)
                     : cs.surfaceContainerHighest.withValues(alpha: 0.75),
                 pageImageColorFilter: _filterFor(_colorMode),
+                pagePaintCallbacks: [?_searcher?.pageTextMatchPaintCallback],
                 matchTextColor: Colors.white.withValues(alpha: 0.6),
                 activeMatchTextColor: Colors.white,
                 onPageChanged: (number) {
@@ -249,7 +297,18 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                   _scheduleSave();
                 },
                 onViewerReady: (document, _) {
-                  setState(() => _pageCount = document.pages.length);
+                  setState(() {
+                    _pageCount = document.pages.length;
+                    _searcher ??= pdfrx.PdfTextSearcher(_ctl);
+                  });
+                  if (batteryHook &&
+                      batterySearchTerm.isNotEmpty &&
+                      !_batterySearchStarted) {
+                    _batterySearchStarted = true;
+                    _searchCtrl.text = batterySearchTerm;
+                    _searcher!
+                        .startTextSearch(batterySearchTerm, caseInsensitive: true);
+                  }
                 },
               ),
             ),
@@ -371,103 +430,6 @@ class _ReaderScaffold extends StatelessWidget {
   }
 }
 
-class _SearchBar extends StatelessWidget {
-  const _SearchBar({
-    required this.controller,
-    required this.searcher,
-    required this.onClose,
-  });
-
-  final TextEditingController controller;
-  final pdfrx.PdfTextSearcher searcher;
-  final VoidCallback onClose;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return SafeArea(
-      bottom: false,
-      child: Container(
-        margin: const EdgeInsets.fromLTRB(Dv.sp12, Dv.sp8, Dv.sp12, Dv.sp8),
-        padding: const EdgeInsets.symmetric(horizontal: Dv.sp12),
-        decoration: BoxDecoration(
-          color: cs.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(Dv.rLg),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.search_rounded, color: cs.onSurfaceVariant),
-            const SizedBox(width: Dv.sp8),
-            Expanded(
-              child: TextField(
-                controller: controller,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  hintText: 'Search in document',
-                  border: InputBorder.none,
-                ),
-                onChanged: (v) {
-                  if (v.trim().isEmpty) {
-                    searcher.resetTextSearch();
-                    return;
-                  }
-                  searcher.startTextSearch(
-                    v,
-                    caseInsensitive: true,
-                  );
-                },
-              ),
-            ),
-            AnimatedBuilder(
-              animation: searcher,
-              builder: (context, _) {
-                final idx = searcher.currentIndex;
-                final matches = searcher.matches;
-                final text = matches.isEmpty
-                    ? (searcher.isSearching ? '…' : '')
-                    : '${(idx ?? 0) + 1}/${matches.length}';
-                return Text(
-                  text,
-                  style: Theme.of(context).textTheme.bodyMedium,
-                );
-              },
-            ),
-            AnimatedBuilder(
-              animation: searcher,
-              builder: (context, _) {
-                final disabled = !searcher.hasMatches;
-                return Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      visualDensity: VisualDensity.compact,
-                      onPressed: disabled
-                          ? null
-                          : () => searcher.goToPrevMatch(),
-                      icon: const Icon(Icons.keyboard_arrow_up_rounded),
-                    ),
-                    IconButton(
-                      visualDensity: VisualDensity.compact,
-                      onPressed: disabled
-                          ? null
-                          : () => searcher.goToNextMatch(),
-                      icon: const Icon(Icons.keyboard_arrow_down_rounded),
-                    ),
-                  ],
-                );
-              },
-            ),
-            IconButton(
-              visualDensity: VisualDensity.compact,
-              onPressed: onClose,
-              icon: const Icon(Icons.close_rounded),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 class _BottomBar extends StatelessWidget {
   const _BottomBar({

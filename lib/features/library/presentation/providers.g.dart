@@ -184,6 +184,54 @@ final class ImportServiceProvider
 
 String _$importServiceHash() => r'e02201570906f635b2aa3f75d5b24b0759405778';
 
+@ProviderFor(textIndexRepository)
+final textIndexRepositoryProvider = TextIndexRepositoryProvider._();
+
+final class TextIndexRepositoryProvider
+    extends
+        $FunctionalProvider<
+          TextIndexRepository,
+          TextIndexRepository,
+          TextIndexRepository
+        >
+    with $Provider<TextIndexRepository> {
+  TextIndexRepositoryProvider._()
+    : super(
+        from: null,
+        argument: null,
+        retry: null,
+        name: r'textIndexRepositoryProvider',
+        isAutoDispose: false,
+        dependencies: null,
+        $allTransitiveDependencies: null,
+      );
+
+  @override
+  String debugGetCreateSourceHash() => _$textIndexRepositoryHash();
+
+  @$internal
+  @override
+  $ProviderElement<TextIndexRepository> $createElement(
+    $ProviderPointer pointer,
+  ) => $ProviderElement(pointer);
+
+  @override
+  TextIndexRepository create(Ref ref) {
+    return textIndexRepository(ref);
+  }
+
+  /// {@macro riverpod.override_with_value}
+  Override overrideWithValue(TextIndexRepository value) {
+    return $ProviderOverride(
+      origin: this,
+      providerOverride: $SyncValueProvider<TextIndexRepository>(value),
+    );
+  }
+}
+
+String _$textIndexRepositoryHash() =>
+    r'b9e0a38515afc76e647e8935d24bd0b4228256d6';
+
 /// Library view state (sort/chip/search) + grid-vs-list presentation mode.
 
 @ProviderFor(LibraryPrefs)
@@ -278,7 +326,7 @@ final class ImportRunnerProvider
   }
 }
 
-String _$importRunnerHash() => r'431f270317dc5d080b03e13bc4d047e66040e822';
+String _$importRunnerHash() => r'ab7107f7b4d82faeb9692592fac4432fbec76bba';
 
 /// Import run state for UI feedback.
 

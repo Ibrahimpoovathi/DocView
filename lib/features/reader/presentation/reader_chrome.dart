@@ -3,6 +3,92 @@ import 'package:flutter/material.dart';
 import '../../../../core/design/dv.dart';
 import '../domain/viewer_prefs.dart';
 
+/// Search bar shared by PDF / reflow / office readers: field, live match
+/// count, prev/next, close.
+class ReaderSearchBar extends StatelessWidget {
+  const ReaderSearchBar({
+    super.key,
+    required this.controller,
+    required this.countText,
+    required this.onQuery,
+    required this.onPrev,
+    required this.onNext,
+    required this.onClose,
+    this.busy = false,
+    this.onCountTap,
+  });
+
+  final TextEditingController controller;
+
+  /// '', 'n' while counting, or 'i/n' when navigating matches.
+  final String countText;
+  final bool busy;
+  final ValueChanged<String> onQuery;
+  final VoidCallback onPrev;
+  final VoidCallback onNext;
+  final VoidCallback onClose;
+
+  /// Optional: tapping the count opens the results overview.
+  final VoidCallback? onCountTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return SafeArea(
+      bottom: false,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(Dv.sp12, Dv.sp8, Dv.sp12, Dv.sp8),
+        padding: const EdgeInsets.symmetric(horizontal: Dv.sp12),
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(Dv.rLg),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.search_rounded),
+            const SizedBox(width: Dv.sp8),
+            Expanded(
+              child: TextField(
+                controller: controller,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  hintText: 'Search in document',
+                  border: InputBorder.none,
+                ),
+                onChanged: onQuery,
+              ),
+            ),
+            if (busy || countText.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: Dv.sp8),
+                child: GestureDetector(
+                  onTap: onCountTap,
+                  behavior: HitTestBehavior.opaque,
+                  child: Text(countText),
+                ),
+              ),
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              onPressed: onPrev,
+              icon: const Icon(Icons.keyboard_arrow_up_rounded),
+            ),
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              onPressed: onNext,
+              icon: const Icon(Icons.keyboard_arrow_down_rounded),
+            ),
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              onPressed: onClose,
+              icon: const Icon(Icons.close_rounded),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// Bottom bar shared by the PDF and reflow readers: outline, search, color
 /// mode cycle, page/progress slider.
 class ReaderBottomBar extends StatelessWidget {

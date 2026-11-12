@@ -13,6 +13,7 @@ enum DocFormat {
   fb2('FB2'),
   rtf('RTF'),
   doc('DOC'),
+  ppt('PPT'),
   odt('ODT'),
   other('DOC');
 
@@ -44,6 +45,7 @@ enum DocFormat {
         'fb2' => DocFormat.fb2,
         'rtf' => DocFormat.rtf,
         'doc' => DocFormat.doc,
+        'ppt' => DocFormat.ppt,
         'odt' => DocFormat.odt,
         _ => DocFormat.other,
       };

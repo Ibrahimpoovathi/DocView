@@ -40,7 +40,20 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
   @override
   void initState() {
     super.initState();
+    unawaited(ref.read(textIndexRepositoryProvider).runPending());
     if (batteryHook) unawaited(_batterySeed());
+    if (batteryHook && batterySearchTerm.isNotEmpty) {
+      // Battery: exercise the FTS library-search path end to end.
+      setState(() {
+        _searchOpen = true;
+        _searchCtrl.text = batterySearchTerm;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          ref.read(libraryPrefsProvider.notifier).setSearch(batterySearchTerm);
+        }
+      });
+    }
   }
 
   /// Battery hook (debug-define builds only): import the bundled mini PDF
@@ -62,12 +75,13 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
           },
         );
     if (summary.added < 1) return;
+    // Battery runs can pin a specific seed format (DOCVIEW_BATTERY_OPEN).
+    // 'none' imports only (library-search batteries); default: office first.
+    if (batteryOpenFormat.toLowerCase() == 'none') return;
     final docs = await ref
         .read(libraryRepositoryProvider)
         .watchLibrary(const LibraryQuery())
         .first;
-    // Battery runs can pin a specific seed format (DOCVIEW_BATTERY_OPEN).
-    // Default: office formats first so the battery exercises Phase 4.
     final pinned = () {
       switch (batteryOpenFormat.toLowerCase()) {
         case 'xlsx':

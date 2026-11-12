@@ -2,16 +2,19 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:docx_file_viewer/docx_file_viewer.dart';
-import 'package:excel_plus/excel_plus.dart';
+import 'package:excel_plus/excel_plus.dart' hide TextSpan;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../app/router.dart';
+import '../../../core/design/dv.dart';
 import '../../../core/format/doc_format.dart';
 import '../../../core/storage/database.dart';
 import '../data/odt_text.dart';
 import '../data/pptx_text.dart';
 import '../data/rtf_text.dart';
+import '../data/text_search.dart';
 import '../domain/viewer_prefs.dart';
 import '../../library/presentation/providers.dart';
 
@@ -80,7 +83,10 @@ abstract class OfficeReaderState<W extends ConsumerStatefulWidget>
     } on Object catch (e) {
       _error = e.toString();
     } finally {
-      if (mounted) setState(() => _booting = false);
+      if (mounted) {
+        setState(() => _booting = false);
+        maybeAutoSearch();
+      }
     }
   }
 
@@ -125,6 +131,40 @@ abstract class OfficeReaderState<W extends ConsumerStatefulWidget>
     if (!controller.hasClients) return 0;
     final max = controller.position.maxScrollExtent;
     return (max > 0 ? controller.offset / max : 0).clamp(0, 1).toDouble();
+  }
+
+  // --- in-document search ----------------------------------------------------
+  // Formats with their own search UI (docx) return null from searchableLines
+  // and get no search icon; the rest expose one searchable line per unit
+  // (paragraph / row / slide) and jump via jumpToSearchHit.
+
+  /// Searchable lines, or null when this screen has its own search UI.
+  List<String>? searchableLines() => null;
+
+  /// Called when a result of [searchableLines] is picked in the sheet.
+  void jumpToSearchHit(int lineIndex) {}
+
+  void _openSearchSheet({bool batteryAuto = false}) {
+    final lines = searchableLines();
+    if (lines == null || lines.isEmpty) return;
+    if (!mounted) return;
+    unawaited(showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(Dv.rXl)),
+      ),
+      builder: (sheetCtx) => _OfficeSearchSheet(
+        lines: lines,
+        initialQuery: batteryAuto ? batterySearchTerm : null,
+        onJump: (idx) {
+          Navigator.maybePop(sheetCtx);
+          jumpToSearchHit(idx);
+        },
+      ),
+    ));
   }
 
   Widget buildLoading() => const Center(
@@ -177,6 +217,12 @@ abstract class OfficeReaderState<W extends ConsumerStatefulWidget>
           overflow: TextOverflow.ellipsis,
         ),
         actions: [
+          if (!_booting && _error == null && searchableLines() != null)
+            IconButton(
+              tooltip: 'Search',
+              onPressed: () => _openSearchSheet(),
+              icon: const Icon(Icons.search_rounded),
+            ),
           IconButton(
             tooltip: 'Color: $_colorMode',
             onPressed: cycleColorMode,
@@ -193,6 +239,15 @@ abstract class OfficeReaderState<W extends ConsumerStatefulWidget>
           : (_error != null ? buildError() : body),
       bottomNavigationBar: bottomBar,
     );
+  }
+
+  void maybeAutoSearch() {
+    if (!batteryHook || batterySearchTerm.isEmpty) return;
+    if (searchableLines() == null) return;
+    if (searchableLines()!.isEmpty) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _openSearchSheet(batteryAuto: true);
+    });
   }
 }
 
@@ -314,6 +369,21 @@ class _XlsxScreenState extends OfficeReaderState<XlsxScreen> {
   void persistProgress() {
     if (!_scroll.hasClients) return;
     scheduleProgressSave(scrollFraction(_scroll), _current);
+  }
+
+  @override
+  List<String>? searchableLines() =>
+      [for (final r in _sheets[_current] ?? const <List<String>>[]) r.join(' · ')];
+
+  @override
+  void jumpToSearchHit(int lineIndex) {
+    final rows = _sheets[_current] ?? const <List<String>>[];
+    if (rows.isEmpty || lineIndex >= rows.length) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scroll.hasClients) return;
+      final max = _scroll.position.maxScrollExtent;
+      _scroll.jumpTo(((lineIndex / rows.length).clamp(0, 1) * max));
+    });
   }
 
   @override
@@ -455,6 +525,20 @@ class _PptxScreenState extends OfficeReaderState<PptxScreen> {
   }
 
   @override
+  List<String>? searchableLines() => [
+        for (final s in _slides)
+          s.title.isEmpty
+              ? s.body.join(' — ')
+              : '${s.title} — ${s.body.join(' — ')}',
+      ];
+
+  @override
+  void jumpToSearchHit(int lineIndex) {
+    if (lineIndex >= _slides.length) return;
+    _openSlide(context, _slides[lineIndex]);
+  }
+
+  @override
   Widget build(BuildContext context) {
     if (booting || error != null) {
       return buildOfficeScaffold(body: const SizedBox.shrink());
@@ -573,6 +657,21 @@ class _TextDocScreenState extends OfficeReaderState<TextDocScreen> {
   }
 
   @override
+  List<String>? searchableLines() => [for (final par in _paragraphs) par.text];
+
+  @override
+  void jumpToSearchHit(int lineIndex) {
+    if (lineIndex >= _paragraphs.length) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scroll.hasClients) return;
+      final max = _scroll.position.maxScrollExtent;
+      _scroll.jumpTo(
+        ((lineIndex / _paragraphs.length).clamp(0, 1) * max),
+      );
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     if (booting || error != null) {
       return buildOfficeScaffold(body: const SizedBox.shrink());
@@ -607,6 +706,149 @@ class _TextDocScreenState extends OfficeReaderState<TextDocScreen> {
           },
         ),
       ),
+    );
+  }
+}
+
+// --- office search sheet ------------------------------------------------------
+
+class _OfficeSearchSheet extends StatefulWidget {
+  const _OfficeSearchSheet({
+    required this.lines,
+    required this.onJump,
+    this.initialQuery,
+  });
+
+  final List<String> lines;
+  final void Function(int lineIndex) onJump;
+  final String? initialQuery;
+
+  @override
+  State<_OfficeSearchSheet> createState() => _OfficeSearchSheetState();
+}
+
+class _OfficeSearchSheetState extends State<_OfficeSearchSheet> {
+  late final TextEditingController _ctrl =
+      TextEditingController(text: widget.initialQuery ?? '');
+  List<TextHit> _hits = const [];
+  Timer? _debounce;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialQuery != null && widget.initialQuery!.isNotEmpty) {
+      _recompute();
+    }
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _recompute() {
+    setState(() => _hits = findTextHits(widget.lines, _ctrl.text));
+  }
+
+  void _onQuery(String v) {
+    _debounce?.cancel();
+    if (v.trim().isEmpty) {
+      setState(() => _hits = const []);
+      return;
+    }
+    _debounce = Timer(const Duration(milliseconds: 200), _recompute);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+          child: TextField(
+            controller: _ctrl,
+            autofocus: true,
+            decoration: InputDecoration(
+              prefixIcon: const Icon(Icons.search_rounded),
+              hintText: 'Search in document',
+              isDense: true,
+              suffixIcon: _hits.isNotEmpty
+                  ? Padding(
+                      padding: const EdgeInsets.only(right: 12),
+                      child: Center(
+                        child: Text('${_hits.length}',
+                            style: Theme.of(context).textTheme.bodyMedium),
+                      ),
+                    )
+                  : null,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(Dv.rLg),
+              ),
+            ),
+            onChanged: _onQuery,
+            onSubmitted: (_) => _recompute(),
+          ),
+        ),
+        Expanded(
+          child: _hits.isEmpty && _ctrl.text.trim().isEmpty
+              ? Center(
+                  child: Text(
+                    'Type to search ${widget.lines.length} items',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                )
+              : _hits.isEmpty
+                  ? Center(
+                      child: Text(
+                        'No matches',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: _hits.length,
+                      itemBuilder: (_, i) {
+                        final hit = _hits[i];
+                        return ListTile(
+                          dense: true,
+                          title: RichText(
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            text: TextSpan(
+                              style: DefaultTextStyle.of(context)
+                                  .style
+                                  .copyWith(fontSize: 14),
+                              children: [
+                                TextSpan(text: hit.pre),
+                                TextSpan(
+                                  text: hit.hit,
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    color: cs.primary,
+                                  ),
+                                ),
+                                TextSpan(text: hit.post),
+                              ],
+                            ),
+                          ),
+                          onTap: () => widget.onJump(hit.index),
+                        );
+                      },
+                    ),
+        ),
+        SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: OutlinedButton(
+              onPressed: () => Navigator.maybePop(context),
+              child: const Text('Back'),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

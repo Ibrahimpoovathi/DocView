@@ -173,6 +173,18 @@ class $DocumentsTable extends Documents
     type: DriftSqlType.dateTime,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _textIndexedMeta = const VerificationMeta(
+    'textIndexed',
+  );
+  @override
+  late final GeneratedColumn<int> textIndexed = GeneratedColumn<int>(
+    'text_indexed',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -190,6 +202,7 @@ class $DocumentsTable extends Documents
     addedAt,
     lastOpenedAt,
     deletedAt,
+    textIndexed,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -305,6 +318,15 @@ class $DocumentsTable extends Documents
         deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
       );
     }
+    if (data.containsKey('text_indexed')) {
+      context.handle(
+        _textIndexedMeta,
+        textIndexed.isAcceptableOrUnknown(
+          data['text_indexed']!,
+          _textIndexedMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -376,6 +398,10 @@ class $DocumentsTable extends Documents
         DriftSqlType.dateTime,
         data['${effectivePrefix}deleted_at'],
       ),
+      textIndexed: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}text_indexed'],
+      )!,
     );
   }
 
@@ -404,6 +430,10 @@ class Document extends DataClass implements Insertable<Document> {
   final DateTime addedAt;
   final DateTime? lastOpenedAt;
   final DateTime? deletedAt;
+
+  /// 0 = body text not yet pulled into document_fts (background indexer);
+  /// 1 = done (regardless of whether any extractable body existed).
+  final int textIndexed;
   const Document({
     required this.id,
     required this.uuid,
@@ -420,6 +450,7 @@ class Document extends DataClass implements Insertable<Document> {
     required this.addedAt,
     this.lastOpenedAt,
     this.deletedAt,
+    required this.textIndexed,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -453,6 +484,7 @@ class Document extends DataClass implements Insertable<Document> {
     if (!nullToAbsent || deletedAt != null) {
       map['deleted_at'] = Variable<DateTime>(deletedAt);
     }
+    map['text_indexed'] = Variable<int>(textIndexed);
     return map;
   }
 
@@ -483,6 +515,7 @@ class Document extends DataClass implements Insertable<Document> {
       deletedAt: deletedAt == null && nullToAbsent
           ? const Value.absent()
           : Value(deletedAt),
+      textIndexed: Value(textIndexed),
     );
   }
 
@@ -509,6 +542,7 @@ class Document extends DataClass implements Insertable<Document> {
       addedAt: serializer.fromJson<DateTime>(json['addedAt']),
       lastOpenedAt: serializer.fromJson<DateTime?>(json['lastOpenedAt']),
       deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
+      textIndexed: serializer.fromJson<int>(json['textIndexed']),
     );
   }
   @override
@@ -532,6 +566,7 @@ class Document extends DataClass implements Insertable<Document> {
       'addedAt': serializer.toJson<DateTime>(addedAt),
       'lastOpenedAt': serializer.toJson<DateTime?>(lastOpenedAt),
       'deletedAt': serializer.toJson<DateTime?>(deletedAt),
+      'textIndexed': serializer.toJson<int>(textIndexed),
     };
   }
 
@@ -551,6 +586,7 @@ class Document extends DataClass implements Insertable<Document> {
     DateTime? addedAt,
     Value<DateTime?> lastOpenedAt = const Value.absent(),
     Value<DateTime?> deletedAt = const Value.absent(),
+    int? textIndexed,
   }) => Document(
     id: id ?? this.id,
     uuid: uuid ?? this.uuid,
@@ -567,6 +603,7 @@ class Document extends DataClass implements Insertable<Document> {
     addedAt: addedAt ?? this.addedAt,
     lastOpenedAt: lastOpenedAt.present ? lastOpenedAt.value : this.lastOpenedAt,
     deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+    textIndexed: textIndexed ?? this.textIndexed,
   );
   Document copyWithCompanion(DocumentsCompanion data) {
     return Document(
@@ -593,6 +630,9 @@ class Document extends DataClass implements Insertable<Document> {
           ? data.lastOpenedAt.value
           : this.lastOpenedAt,
       deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+      textIndexed: data.textIndexed.present
+          ? data.textIndexed.value
+          : this.textIndexed,
     );
   }
 
@@ -613,7 +653,8 @@ class Document extends DataClass implements Insertable<Document> {
           ..write('isFavourite: $isFavourite, ')
           ..write('addedAt: $addedAt, ')
           ..write('lastOpenedAt: $lastOpenedAt, ')
-          ..write('deletedAt: $deletedAt')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('textIndexed: $textIndexed')
           ..write(')'))
         .toString();
   }
@@ -635,6 +676,7 @@ class Document extends DataClass implements Insertable<Document> {
     addedAt,
     lastOpenedAt,
     deletedAt,
+    textIndexed,
   );
   @override
   bool operator ==(Object other) =>
@@ -654,7 +696,8 @@ class Document extends DataClass implements Insertable<Document> {
           other.isFavourite == this.isFavourite &&
           other.addedAt == this.addedAt &&
           other.lastOpenedAt == this.lastOpenedAt &&
-          other.deletedAt == this.deletedAt);
+          other.deletedAt == this.deletedAt &&
+          other.textIndexed == this.textIndexed);
 }
 
 class DocumentsCompanion extends UpdateCompanion<Document> {
@@ -673,6 +716,7 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
   final Value<DateTime> addedAt;
   final Value<DateTime?> lastOpenedAt;
   final Value<DateTime?> deletedAt;
+  final Value<int> textIndexed;
   const DocumentsCompanion({
     this.id = const Value.absent(),
     this.uuid = const Value.absent(),
@@ -689,6 +733,7 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
     this.addedAt = const Value.absent(),
     this.lastOpenedAt = const Value.absent(),
     this.deletedAt = const Value.absent(),
+    this.textIndexed = const Value.absent(),
   });
   DocumentsCompanion.insert({
     this.id = const Value.absent(),
@@ -706,6 +751,7 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
     this.addedAt = const Value.absent(),
     this.lastOpenedAt = const Value.absent(),
     this.deletedAt = const Value.absent(),
+    this.textIndexed = const Value.absent(),
   }) : uuid = Value(uuid),
        format = Value(format),
        originalName = Value(originalName),
@@ -729,6 +775,7 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
     Expression<DateTime>? addedAt,
     Expression<DateTime>? lastOpenedAt,
     Expression<DateTime>? deletedAt,
+    Expression<int>? textIndexed,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
@@ -746,6 +793,7 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
       if (addedAt != null) 'added_at': addedAt,
       if (lastOpenedAt != null) 'last_opened_at': lastOpenedAt,
       if (deletedAt != null) 'deleted_at': deletedAt,
+      if (textIndexed != null) 'text_indexed': textIndexed,
     });
   }
 
@@ -765,6 +813,7 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
     Value<DateTime>? addedAt,
     Value<DateTime?>? lastOpenedAt,
     Value<DateTime?>? deletedAt,
+    Value<int>? textIndexed,
   }) {
     return DocumentsCompanion(
       id: id ?? this.id,
@@ -782,6 +831,7 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
       addedAt: addedAt ?? this.addedAt,
       lastOpenedAt: lastOpenedAt ?? this.lastOpenedAt,
       deletedAt: deletedAt ?? this.deletedAt,
+      textIndexed: textIndexed ?? this.textIndexed,
     );
   }
 
@@ -835,6 +885,9 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
     if (deletedAt.present) {
       map['deleted_at'] = Variable<DateTime>(deletedAt.value);
     }
+    if (textIndexed.present) {
+      map['text_indexed'] = Variable<int>(textIndexed.value);
+    }
     return map;
   }
 
@@ -855,7 +908,8 @@ class DocumentsCompanion extends UpdateCompanion<Document> {
           ..write('isFavourite: $isFavourite, ')
           ..write('addedAt: $addedAt, ')
           ..write('lastOpenedAt: $lastOpenedAt, ')
-          ..write('deletedAt: $deletedAt')
+          ..write('deletedAt: $deletedAt, ')
+          ..write('textIndexed: $textIndexed')
           ..write(')'))
         .toString();
   }
@@ -2343,6 +2397,7 @@ typedef $$DocumentsTableCreateCompanionBuilder =
       Value<DateTime> addedAt,
       Value<DateTime?> lastOpenedAt,
       Value<DateTime?> deletedAt,
+      Value<int> textIndexed,
     });
 typedef $$DocumentsTableUpdateCompanionBuilder =
     DocumentsCompanion Function({
@@ -2361,6 +2416,7 @@ typedef $$DocumentsTableUpdateCompanionBuilder =
       Value<DateTime> addedAt,
       Value<DateTime?> lastOpenedAt,
       Value<DateTime?> deletedAt,
+      Value<int> textIndexed,
     });
 
 final class $$DocumentsTableReferences
@@ -2524,6 +2580,11 @@ class $$DocumentsTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
+  ColumnFilters<int> get textIndexed => $composableBuilder(
+    column: $table.textIndexed,
+    builder: (column) => ColumnFilters(column),
+  );
+
   Expression<bool> documentCollectionsRefs(
     Expression<bool> Function($$DocumentCollectionsTableFilterComposer f) f,
   ) {
@@ -2683,6 +2744,11 @@ class $$DocumentsTableOrderingComposer
     column: $table.deletedAt,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<int> get textIndexed => $composableBuilder(
+    column: $table.textIndexed,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$DocumentsTableAnnotationComposer
@@ -2746,6 +2812,11 @@ class $$DocumentsTableAnnotationComposer
 
   GeneratedColumn<DateTime> get deletedAt =>
       $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+
+  GeneratedColumn<int> get textIndexed => $composableBuilder(
+    column: $table.textIndexed,
+    builder: (column) => column,
+  );
 
   Expression<T> documentCollectionsRefs<T extends Object>(
     Expression<T> Function($$DocumentCollectionsTableAnnotationComposer a) f,
@@ -2871,6 +2942,7 @@ class $$DocumentsTableTableManager
                 Value<DateTime> addedAt = const Value.absent(),
                 Value<DateTime?> lastOpenedAt = const Value.absent(),
                 Value<DateTime?> deletedAt = const Value.absent(),
+                Value<int> textIndexed = const Value.absent(),
               }) => DocumentsCompanion(
                 id: id,
                 uuid: uuid,
@@ -2887,6 +2959,7 @@ class $$DocumentsTableTableManager
                 addedAt: addedAt,
                 lastOpenedAt: lastOpenedAt,
                 deletedAt: deletedAt,
+                textIndexed: textIndexed,
               ),
           createCompanionCallback:
               ({
@@ -2905,6 +2978,7 @@ class $$DocumentsTableTableManager
                 Value<DateTime> addedAt = const Value.absent(),
                 Value<DateTime?> lastOpenedAt = const Value.absent(),
                 Value<DateTime?> deletedAt = const Value.absent(),
+                Value<int> textIndexed = const Value.absent(),
               }) => DocumentsCompanion.insert(
                 id: id,
                 uuid: uuid,
@@ -2921,6 +2995,7 @@ class $$DocumentsTableTableManager
                 addedAt: addedAt,
                 lastOpenedAt: lastOpenedAt,
                 deletedAt: deletedAt,
+                textIndexed: textIndexed,
               ),
           withReferenceMapper: (p0) => p0
               .map(

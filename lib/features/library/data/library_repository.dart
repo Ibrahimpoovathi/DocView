@@ -12,37 +12,78 @@ class LibraryRepository {
 
   final AppDatabase _db;
 
+  /// Builds a safe FTS5 MATCH string out of free-text user input.
+  /// Returns null when there is nothing matchable (empty/whitespace/punctuation).
+  static String? ftsMatchQuery(String raw) {
+    final words = RegExp(r'[\p{L}\p{N}_]+', unicode: true)
+        .allMatches(raw)
+        .map((m) => m.group(0)!)
+        .take(8)
+        .toList();
+    if (words.isEmpty) return null;
+    return words.map((w) => '"$w"').join(' ');
+  }
+
   // --- Reads ----------------------------------------------------------------
 
   /// Live library list honoring query (soft-deleted excluded).
+  ///
+  /// When a search term is present we go through FTS5 (title, author, body)
+  /// ranked by bm25; otherwise the plain drift query keeps the chosen sort.
   Stream<List<Document>> watchLibrary(LibraryQuery q) {
-    final plainQuery = q.search.trim().toUpperCase();
-    final t = _db.documents;
+    final term = ftsMatchQuery(q.search);
+    if (term == null) {
+      final t = _db.documents;
+      final plainQuery = q.search.trim().toUpperCase();
 
-    Expression<bool> notDeleted() => t.deletedAt.isNull();
-    final whereExpr = switch (q.chip) {
-      LibraryChip.all => notDeleted(),
-      LibraryChip.favourites =>
-        notDeleted() & t.isFavourite.equals(true),
-      LibraryChip.recent =>
-        notDeleted() & t.lastOpenedAt.isNotNull(),
-    };
+      Expression<bool> notDeleted() => t.deletedAt.isNull();
+      final whereExpr = switch (q.chip) {
+        LibraryChip.all => notDeleted(),
+        LibraryChip.favourites =>
+          notDeleted() & t.isFavourite.equals(true),
+        LibraryChip.recent =>
+          notDeleted() & t.lastOpenedAt.isNotNull(),
+      };
 
-    final query = _db.select(t)
-      ..where((d) => whereExpr)
-      ..orderBy(_orderFor(q.sort, t));
+      final query = _db.select(t)
+        ..where((d) => whereExpr)
+        ..orderBy(_orderFor(q.sort, t));
 
-    if (plainQuery.isEmpty) {
-      return query.watch();
+      if (plainQuery.isEmpty) {
+        return query.watch();
+      }
+
+      // Fallback while the FTS index still fills in: substring match on
+      // metadata only (fast, no rank ordering).
+      return query.watch().map((rows) => rows
+          .where((d) =>
+              d.title.toUpperCase().contains(plainQuery) ||
+              (d.author ?? '').toUpperCase().contains(plainQuery) ||
+              d.originalName.toUpperCase().contains(plainQuery))
+          .toList());
     }
 
-    // In-memory filter for P1 (FTS5 arrives in P5).
-    return query.watch().map((rows) => rows
-        .where((d) =>
-            d.title.toUpperCase().contains(plainQuery) ||
-            (d.author ?? '').toUpperCase().contains(plainQuery) ||
-            d.originalName.toUpperCase().contains(plainQuery))
-        .toList());
+    // FTS5 path. Chip filters + no in-memory post-filter (FTS covers it).
+    final chipSql = switch (q.chip) {
+      LibraryChip.all => '',
+      LibraryChip.favourites => ' AND d.is_favourite = 1',
+      LibraryChip.recent => ' AND d.last_opened_at IS NOT NULL',
+    };
+    return _db
+        .customSelect(
+          'SELECT d.* FROM documents d '
+          'JOIN document_fts f ON f.rowid = d.id '
+          "WHERE d.deleted_at IS NULL$chipSql AND document_fts MATCH ? "
+          'ORDER BY bm25(document_fts)',
+          variables: [Variable.withString(term)],
+          readsFrom: {_db.documents},
+        )
+        .watch()
+        // mapFromRow is Future-based; map() on the table info is the sync
+        // equivalent and handles enum/datetime/bool conversions itself.
+        .map((rows) => [
+              for (final row in rows) _db.documents.map(row.data),
+            ]);
   }
 
   /// Continue-reading shelf: last opened, most recent first.
@@ -101,8 +142,16 @@ class LibraryRepository {
             ..where((d) => d.sha256.equals(sha256) & d.deletedAt.isNull()))
           .getSingleOrNull();
 
-  Future<int> insertDocument(DocumentsCompanion entry) =>
-      _db.into(_db.documents).insert(entry);
+  Future<int> insertDocument(DocumentsCompanion entry) async {
+    final id = await _db.into(_db.documents).insert(entry);
+    final row = await (_db.select(_db.documents)
+          ..where((d) => d.id.equals(id)))
+        .getSingleOrNull();
+    if (row != null) {
+      await _syncFtsMeta(row.id, row.title, row.author);
+    }
+    return id;
+  }
 
   Future<void> updateFields(
     int id, {
@@ -110,18 +159,49 @@ class LibraryRepository {
     String? author,
     String? coverPath,
     int? pageCount,
-  }) =>
-      (_db.update(_db.documents)..where((d) => d.id.equals(id))).write(
-        DocumentsCompanion(
-          title: title == null ? const Value.absent() : Value(title),
-          author: author == null ? const Value.absent() : Value(author),
-          coverPath: coverPath == null
-              ? const Value.absent()
-              : Value(coverPath),
-          pageCount:
-              pageCount == null ? const Value.absent() : Value(pageCount),
-        ),
+  }) async {
+    if (title != null || author != null) {
+      final doc = await byId(id);
+      final newTitle = title ?? doc?.title;
+      final newAuthor = author ?? doc?.author;
+      if (newTitle != null) {
+        await _syncFtsMeta(id, newTitle, newAuthor);
+      }
+    }
+    await (_db.update(_db.documents)..where((d) => d.id.equals(id))).write(
+      DocumentsCompanion(
+        title: title == null ? const Value.absent() : Value(title),
+        author: author == null ? const Value.absent() : Value(author),
+        coverPath: coverPath == null
+            ? const Value.absent()
+            : Value(coverPath),
+        pageCount:
+            pageCount == null ? const Value.absent() : Value(pageCount),
+      ),
+    );
+  }
+
+  /// Keeps the FTS5 row in step with document metadata without clobbering
+  /// any previously indexed body text. (FTS5 virtual tables don't support
+  /// UPSERT — read the old body, then DELETE + INSERT in one transaction.)
+  Future<void> _syncFtsMeta(int id, String title, String? author) async {
+    final existing = await _db
+        .customSelect('SELECT body FROM document_fts WHERE rowid = ?',
+            variables: [Variable.withInt(id)])
+        .getSingleOrNull();
+    final body = existing == null ? '' : (existing.data['body'] ?? '') as String;
+    await _db.transaction(() async {
+      await _db.customStatement(
+        'DELETE FROM document_fts WHERE rowid = ?',
+        [id],
       );
+      await _db.customStatement(
+        'INSERT INTO document_fts(rowid, title, author, body) '
+        'VALUES(?, ?, ?, ?)',
+        [id, title, author ?? '', body],
+      );
+    });
+  }
 
   Future<void> markOpened(int id) =>
       (_db.update(_db.documents)..where((d) => d.id.equals(id)))
@@ -138,6 +218,12 @@ class LibraryRepository {
     if (doc == null) return;
     await (_db.update(_db.documents)..where((d) => d.id.equals(id)))
         .write(DocumentsCompanion(deletedAt: Value(DateTime.now())));
+
+    // Drop the FTS row so deleted bodies never surface in searches.
+    await _db.customStatement(
+      'DELETE FROM document_fts WHERE rowid = ?',
+      [id],
+    );
 
     try {
       await AppPaths.deleteBookDir(doc.uuid);

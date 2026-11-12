@@ -25,6 +25,12 @@
 <script>
 window.addEventListener('error', function (e) {
   var info = (e.filename || '?') + ':' + (e.lineno || 0) + ' -> ' + e.message
+  // ResizeObserver loop errors are benign layout noise (keyboard opening,
+  // rapid resizes); never treat them as fatal page errors.
+  if (/ResizeObserver loop/i.test(e.message || '')) {
+    console.error('BOOTERR (benign) ' + info)
+    return
+  }
   console.error('BOOTERR ' + info)
   window.flutter_inappwebview?.callHandler?.('onReflowError', info)
 })
@@ -164,6 +170,64 @@ window.docviewCommand = cmd => {
 }
 window.docviewGoToFraction = f => view.goToFraction?.(f)
 window.docviewGoTo = loc => view.goTo?.(loc)
+
+// --- search bridge ----------------------------------------------------------
+let _searchSeq = 0
+
+const excerptOf = e =>
+  e == null
+    ? { pre: '', hit: '', post: '' }
+    : {
+        pre: String(e.pre ?? '').slice(-60),
+        hit: String(e.match ?? ''),
+        post: String(e.post ?? '').slice(0, 60),
+      }
+
+window.docviewSearch = async query => {
+  const seq = ++_searchSeq
+  notify('onReflowSearchStart', { seq })
+  const results = []
+  try {
+    for await (const result of view.search({ query })) {
+      if (seq !== _searchSeq) return
+      if (result === 'done') break
+      if (typeof result.progress === 'number') {
+        notify('onReflowSearchProgress', {
+          seq,
+          count: results.length,
+          progress: result.progress,
+        })
+      } else if (result.subitems) {
+        for (const sub of result.subitems) {
+          if (sub?.cfi) results.push({ cfi: sub.cfi, ...excerptOf(sub.excerpt) })
+        }
+      } else if (result.cfi) {
+        results.push({ cfi: result.cfi, ...excerptOf(result.excerpt) })
+      }
+    }
+  } catch (err) {
+    if (seq !== _searchSeq) return
+    notify('onReflowSearchResults', {
+      seq,
+      failed: String(err?.message ?? err),
+      count: 0,
+      results: [],
+    })
+    return
+  }
+  if (seq !== _searchSeq) return
+  notify('onReflowSearchResults', {
+    seq,
+    failed: null,
+    count: results.length,
+    results: results.slice(0, 800),
+  })
+}
+
+window.docviewClearSearch = () => {
+  _searchSeq++
+  view.clearSearch?.()
+}
 </script>
 </body>
 </html>
