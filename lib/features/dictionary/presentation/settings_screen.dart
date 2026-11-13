@@ -114,7 +114,26 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Future<void> _syncNow() async {
     final message = await ref.read(syncRunnerProvider.notifier).run();
     if (!mounted) return;
+    setState(() {}); // refresh the Last-synced line
     _snack(message ?? 'Sync unavailable (no account).');
+  }
+
+  Future<int?> _lastSyncAt() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getInt('docview.lastSyncAt');
+    } on Object {
+      return null;
+    }
+  }
+
+  String _relativeSync(int ms) {
+    final d = DateTime.now().difference(
+        DateTime.fromMillisecondsSinceEpoch(ms));
+    if (d.inSeconds < 90) return 'just now';
+    if (d.inMinutes < 60) return '${d.inMinutes} min ago';
+    if (d.inHours < 24) return '${d.inHours} h ago';
+    return '${d.inDays} d ago';
   }
 
   Future<void> _downloadAll() async {
@@ -318,6 +337,28 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             icon: const Icon(Icons.link_off),
             onPressed: _removeAccount,
           ),
+        ),
+        FutureBuilder<int?>(
+          future: _lastSyncAt(),
+          builder: (context, snap) {
+            final raw = snap.data;
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: Dv.sp20),
+              child: Row(
+                children: [
+                  Icon(Icons.history_rounded,
+                      size: 16, color: cs.outline),
+                  const SizedBox(width: Dv.sp8),
+                  Text(
+                    raw == null
+                        ? 'Never synced'
+                        : 'Last synced: ${_relativeSync(raw)}',
+                    style: text.bodySmall?.copyWith(color: cs.outline),
+                  ),
+                ],
+              ),
+            );
+          },
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(Dv.sp20, Dv.sp8, Dv.sp20, 0),

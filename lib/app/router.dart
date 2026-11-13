@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/dictionary/presentation/settings_screen.dart';
@@ -33,6 +34,12 @@ const batterySyncUrl = String.fromEnvironment('DOCVIEW_BATTERY_SYNC');
 /// then opens the annotations list for screenshot verification.
 const batteryNoteFlow = String.fromEnvironment('DOCVIEW_BATTERY_NOTE');
 
+/// Battery-only: inflate the library with N cheap TXT docs
+/// (`--dart-define=DOCVIEW_BATTERY_BIGLIB=200`) to profile big-library
+/// performance. The run ends on the library grid (no reader auto-open).
+/// 0 disables.
+const batteryBigLib = int.fromEnvironment('DOCVIEW_BATTERY_BIGLIB');
+
 final router = GoRouter(
   initialLocation: '/library',
   routes: [
@@ -44,19 +51,55 @@ final router = GoRouter(
       path: '/settings',
       builder: (context, state) => const SettingsScreen(),
     ),
-    GoRoute(
-      path: '/reader/:docId',
-      builder: (context, state) => ReaderScreen(
-        docId: int.parse(state.pathParameters['docId']!),
-      ),
+    ShellRoute(
+      // Wide-screen 2-pane: on ≥840dp the library stays live on the left
+      // while the reader fills the right pane; narrow = full-screen reader.
+      builder: (context, state, navigator) => _ReaderShell(navigator: navigator),
+      routes: [
+        GoRoute(
+          path: '/reader/:docId',
+          builder: (context, state) => ReaderScreen(
+            docId: int.parse(state.pathParameters['docId']!),
+          ),
+        ),
+      ],
     ),
     if (batteryHook)
-      GoRoute(
-        path: '/reader-debug/raw',
-        builder: (context, state) => ReaderScreen(
-          docId: 0,
-          debugPath: state.uri.queryParameters['path'],
-        ),
+      ShellRoute(
+        builder: (context, state, navigator) =>
+            _ReaderShell(navigator: navigator),
+        routes: [
+          GoRoute(
+            path: '/reader-debug/raw',
+            builder: (context, state) => ReaderScreen(
+              docId: 0,
+              debugPath: state.uri.queryParameters['path'],
+            ),
+          ),
+        ],
       ),
   ],
 );
+
+/// Wide-screen 2-pane reader shell. Below 840dp the reader takes the whole
+/// screen; on wide screens the library stays interactive in a fixed-width
+/// left pane (open another book to swap the right pane instantly).
+class _ReaderShell extends StatelessWidget {
+  const _ReaderShell({required this.navigator});
+
+  final Widget navigator;
+
+  @override
+  Widget build(BuildContext context) {
+    final wide = MediaQuery.sizeOf(context).width >= 840;
+    if (!wide) return navigator;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(width: 372, child: LibraryScreen()),
+        const VerticalDivider(width: 1, thickness: 1),
+        Expanded(child: navigator),
+      ],
+    );
+  }
+}

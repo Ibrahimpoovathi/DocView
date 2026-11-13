@@ -161,6 +161,50 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     });
   }
 
+  // --- password-protected PDFs -------------------------------------------------
+
+  int _passwordAttempts = 0;
+
+  /// pdfrx calls this with an empty-password first attempt, then again for
+  /// every wrong password until we return null (cancel → PdfPasswordException
+  /// → viewer error state).
+  Future<String?> _pdfPasswordProvider() async {
+    _passwordAttempts++;
+    if (!mounted) return null;
+    final ctrl = TextEditingController();
+    final password = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) => AlertDialog(
+        title: Text(
+          _passwordAttempts > 1 ? 'Incorrect password' : 'Password required',
+        ),
+        content: TextField(
+          controller: ctrl,
+          obscureText: true,
+          autofocus: true,
+          decoration: const InputDecoration(
+            border: OutlineInputBorder(),
+            labelText: 'Document password',
+          ),
+          onSubmitted: (v) => Navigator.pop(dialogCtx, v),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogCtx, ctrl.text),
+            child: const Text('Unlock'),
+          ),
+        ],
+      ),
+    );
+    if (password == null || password.isEmpty) return null;
+    return password;
+  }
+
   // --- annotations -------------------------------------------------------------
 
   /// Lazily loads a page's structured text so the highlight painter can
@@ -463,6 +507,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
               path,
               controller: _ctl,
               initialPageNumber: _initialPage ?? 1,
+              passwordProvider: _pdfPasswordProvider,
               params: pdfrx.PdfViewerParams(
                 backgroundColor: _colorMode == ViewerColorMode.dark
                     ? const Color(0xFF211D19)

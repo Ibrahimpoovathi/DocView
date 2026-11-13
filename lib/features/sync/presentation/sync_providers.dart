@@ -1,4 +1,5 @@
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../library/presentation/providers.dart';
 import '../data/sync_engine.dart';
@@ -65,8 +66,20 @@ class SyncRunner extends _$SyncRunner {
     state = running;
     try {
       final result = await engine.run();
-      if (!ref.mounted) return 'Sync finished (provider disposed).';
-      return result.summary;
+      final message = ref.mounted
+          ? result.summary
+          : 'Sync finished (provider disposed).';
+      if (!message.startsWith('Sync failed')) {
+        // Success marker for the "Last synced" indicator (best effort).
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setInt(
+              'docview.lastSyncAt', DateTime.now().millisecondsSinceEpoch);
+        } on Object {
+          // Indicator is cosmetic; never fail the sync over it.
+        }
+      }
+      return message;
     } on Object catch (e) {
       if (!ref.mounted) return 'Sync failed (provider disposed): $e';
       return 'Sync failed: $e';

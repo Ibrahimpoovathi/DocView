@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
+import 'package:collection/collection.dart';
 import 'package:docx_creator/docx_creator.dart';
 import 'package:excel_plus/excel_plus.dart';
 import 'package:file_picker/file_picker.dart' as fp;
@@ -39,6 +40,29 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
   final _searchCtrl = TextEditingController();
   bool _searchOpen = false;
 
+  // Cloud-only doc ids (file missing). Computed once per docs-list emission —
+  // never synchronously inside build — so large libraries stay jank-free.
+  List<Document>? _checkedDocs;
+  Set<int> _cloudOnly = const <int>{};
+
+  void _scheduleCloudCheck(List<Document> docs) {
+    if (identical(docs, _checkedDocs)) return;
+    _checkedDocs = docs;
+    unawaited(_computeCloudOnly(docs));
+  }
+
+  Future<void> _computeCloudOnly(List<Document> docs) async {
+    final missing = <int>{};
+    for (var i = 0; i < docs.length; i++) {
+      if (!File(docs[i].storedPath).existsSync()) missing.add(docs[i].id);
+      // Yield between batches so a huge library never blocks a frame.
+      if (i % 50 == 49) await Future<void>.delayed(Duration.zero);
+    }
+    if (!mounted || !identical(docs, _checkedDocs)) return;
+    if (const SetEquality<int>().equals(missing, _cloudOnly)) return;
+    setState(() => _cloudOnly = missing);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -69,6 +93,27 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
   /// plus generated EPUB/TXT and office docs (DOCX/XLSX/PPTX/ODT/RTF)
   /// through the real pipeline and deep-open the first office doc — Phase 4
   /// exercises the new readers.
+  /// Big-library battery seed: `batteryBigLib` small TXT docs in batches of
+  /// 20, yielding between batches so boot stays responsive. Names keep the
+  /// `battery.*` prefix so the idempotent guard covers re-boots.
+  Future<void> _seedBigLibrary() async {
+    final importer = ref.read(importServiceProvider);
+    final batch = 20;
+    for (var base = 0; base < batteryBigLib; base += batch) {
+      final count = (batteryBigLib - base).clamp(1, batch);
+      final files = <String, Uint8List>{};
+      for (var i = 0; i < count; i++) {
+        final n = base + i;
+        files['battery.biglib$n.txt'] = utf8.encode(
+          'Big library probe $n\n\n'
+          '${'Sample paragraph for indexing, search and card rendering. ' * 40}',
+        );
+      }
+      await importer.importBytes(files);
+      await Future<void>.delayed(Duration.zero);
+    }
+  }
+
   Future<void> _batterySeed() async {
     // Idempotent across boots: the generated seeds embed zip timestamps, so
     // their sha256 differs per boot — skip when any previous generation is
@@ -93,6 +138,12 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
           },
         );
     if (summary.added < 1) return;
+    // Big-library battery: inflate with N cheap TXT docs, then stay on the
+    // library grid (no reader auto-open) so boot/scroll behavior is visible.
+    if (batteryBigLib > 0) {
+      await _seedBigLibrary();
+      return;
+    }
     // Battery runs can pin a specific seed format (DOCVIEW_BATTERY_OPEN).
     // 'none' imports only (library-search batteries); default: office first.
     if (batteryOpenFormat.toLowerCase() == 'none') return;
@@ -482,6 +533,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
 
     final body = docsAsync.when(
       data: (docs) {
+        _scheduleCloudCheck(docs);
         final shelf = shelfAsync.value ?? const <Document>[];
 
         if (docs.isEmpty && prefs.search.isEmpty) {
@@ -499,6 +551,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
                       documents: shelf,
                       onOpen: _openDoc,
                       onLongPress: _docMenu,
+                      cloudOnlyIds: _cloudOnly,
                     ),
             ),
             const SliverToBoxAdapter(child: _ChipRow()),
@@ -542,11 +595,13 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
                       docs: docs,
                       onOpen: _openDoc,
                       onLongPress: _docMenu,
+                      cloudOnly: _cloudOnly,
                     )
                   : _DocList(
                       docs: docs,
                       onOpen: _openDoc,
                       onLongPress: _docMenu,
+                      cloudOnly: _cloudOnly,
                     ),
             const SliverToBoxAdapter(
               child: SizedBox(height: 96),
@@ -805,11 +860,13 @@ class _ResponsiveGrid extends StatelessWidget {
     required this.docs,
     required this.onOpen,
     required this.onLongPress,
+    this.cloudOnly = const <int>{},
   });
 
   final List<Document> docs;
   final void Function(Document) onOpen;
   final void Function(Document) onLongPress;
+  final Set<int> cloudOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -829,6 +886,7 @@ class _ResponsiveGrid extends StatelessWidget {
             index: i,
             child: DocCard(
               document: docs[i],
+              cloudOnly: cloudOnly.contains(docs[i].id),
               onOpen: () => onOpen(docs[i]),
               onLongPress: () => onLongPress(docs[i]),
             ),
@@ -845,11 +903,13 @@ class _DocList extends StatelessWidget {
     required this.docs,
     required this.onOpen,
     required this.onLongPress,
+    this.cloudOnly = const <int>{},
   });
 
   final List<Document> docs;
   final void Function(Document) onOpen;
   final void Function(Document) onLongPress;
+  final Set<int> cloudOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -886,7 +946,7 @@ class _DocList extends StatelessWidget {
                                   )
                                 : _listPh(cs),
                           ),
-                          if (!File(d.storedPath).existsSync()) ...[
+                          if (cloudOnly.contains(d.id)) ...[
                             const SizedBox(width: Dv.sp8),
                             Icon(
                               Icons.cloud_download_outlined,

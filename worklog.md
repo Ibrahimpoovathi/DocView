@@ -638,3 +638,68 @@ config that mounted the share at `/` made the app's sync fail silently
 Releases/DocView.apk rebuilt: arm64 0.9.0+9 ≈ 33.2 MB. Open next:
 Phase 9 polish — big-library perf, tablet 2-pane, PDF password prompt,
 "last synced" indicator, README promise audit.
+
+## 2026-11-13 — Phase 9 done (1.0.0+10)
+
+Final polish phase — four promise gaps closed, version 1.0.0+10.
+
+**Big-library perf**: the cloud badge on every `DocCard` and list row
+called `File(...).existsSync()` inside build — one synchronous stat()
+per card per rebuild, which scales linearly with library size. The
+library state now computes a `cloudOnly` id set once per docs-list
+emission (identity-checked, yielding every 50 docs, `SetEquality`
+compare before setState) and passes it down through `_ResponsiveGrid`,
+`_DocList` and `ShelfBar`; `DocCard` takes a plain `cloudOnly` bool.
+Verified with a new big-lib battery (`tool/battery_biglib.sh`,
+`DOCVIEW_BATTERY_BIGLIB=200` + `OPEN=none`): 208-doc seed via batched
+`importBytes` (20 per batch, yielding between batches), grid capture,
+4 fling scrolls. Result: 0 FATAL / 0 app ANR, cold start ≈ 3.0 s, and
+every "Skipped N frames" entry confined to the seed-import window —
+grid building and scrolling are jank-free. The script learned to
+dismiss a host-noise "System UI isn't responding" dialog via
+`uiautomator dump` before flinging (an unconditional tap once hit a
+card and opened a reader instead of scrolling).
+
+**Tablet 2-pane**: reader routes (`/reader/:docId`, plus the battery
+raw route) moved into a `ShellRoute` whose builder is `_ReaderShell` —
+at ≥840dp it shows the library live in a fixed 372dp left pane
+(`LibraryScreen` embedded) beside the reader navigator with a
+`VerticalDivider`; below 840dp it returns the plain navigator so
+phones are pixel-identical to before. Opening another book from the
+left pane swaps the right pane instantly (go_router push on the shell
+navigator). Verified on pixel_tablet (1280dp wide): 2-pane DOCX
+reading captured in the baseline battery; phones unchanged.
+
+**PDF password**: `PdfViewer.file` accepts `passwordProvider`
+directly; the screen passes one that opens a modal dialog
+(barrierDismissible, obscure+autofocus text field, Cancel → null →
+pdfrx throws `PdfPasswordException` → viewer error state, Unlock →
+submit). pdfrx retries per wrong attempt, so the dialog reopens with
+an "Incorrect password" title (attempt counter in state). Empty first
+attempt (pdfrx's `firstAttemptByEmptyPassword`) opens unencrypted
+files without any dialog.
+
+**Last synced**: `SyncRunner.run` persists
+`docview.lastSyncAt` (epoch ms in shared_preferences) after any
+non-failed run (best-effort, wrapped in try/catch); Settings shows
+"Last synced: just now/N min ago/N h ago/N d ago" (or "Never synced")
+under the account tile via `FutureBuilder`, refreshed after
+"Sync now".
+
+**Tests**: 63/63 unchanged, `flutter analyze` 0 issues.
+
+**Battery**: 4-AVD baseline (quick_phone / old_phone / pixel_7 /
+pixel_tablet) FATAL- and ANR-free at 1.0.0+10; tablet leg shows the
+2-pane shell; pixel_7 confirms narrow phones still get the
+full-screen reader. Big-lib battery FATAL-free (see above). Release
+rebuilds: split arm64 → `releases/DocView.apk` (1.0.0+10 ≈ 33.4 MB,
+aapt-verified), baseline battery `app-release.apk` (94.6 MB), big-lib
+battery build built + exercised.
+
+README updated (1.0.0, Phase 9 row Done, 2-pane tablet row, big-lib
+battery table + BIGLIB define, Phase 9 notes paragraph).
+
+Open next: nothing planned — all README promises audited and closed.
+Possible future work: DOCX selection for dictionary/annotations
+(fork deferred from Phase 6), integration-test execution on emulator
+(host-RAM deferred), iOS/CUDA platform runs.

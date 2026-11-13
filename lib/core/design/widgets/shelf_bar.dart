@@ -10,11 +10,15 @@ class ShelfBar extends StatelessWidget {
     required this.documents,
     required this.onOpen,
     required this.onLongPress,
+    this.cloudOnlyIds = const <int>{},
   });
 
   final List<Document> documents;
   final void Function(Document doc) onOpen;
   final void Function(Document doc) onLongPress;
+
+  /// Doc ids whose file is missing (cloud-only) — see [DocCard.cloudOnly].
+  final Set<int> cloudOnlyIds;
 
   @override
   Widget build(BuildContext context) {
@@ -51,6 +55,7 @@ class ShelfBar extends StatelessWidget {
               return DocCard(
                 document: doc,
                 width: 132,
+                cloudOnly: cloudOnlyIds.contains(doc.id),
                 onOpen: () => onOpen(doc),
                 onLongPress: () => onLongPress(doc),
               );

@@ -17,13 +17,15 @@ optional user-owned WebDAV sync.
 | 6 | Dictionary popup (offline StarDict + online fallback, tap-to-lookup) | Done |
 | 7 | WebDAV sync (books + progress + collections, on-demand download) | Done |
 | 8 | Annotations: highlights/notes/bookmarks + sync + markdown export | Done |
-| 9 | Polish: big-library perf, tablet 2-pane, remaining promise gaps | Planned |
+| 9 | Polish: big-library perf, tablet 2-pane, PDF password, last-synced | Done |
 
-Current build: **0.9.0** (Phases 0–8: shell, library, PDF reader, reflow
+Current build: **1.0.0** (Phases 0–9: shell, library, PDF reader, reflow
 readers, office readers, search — in-doc + FTS5 library full-text,
 dictionary popup — offline StarDict + online, WebDAV sync — manifest
 reconcile, on-demand downloads, annotations — highlights/notes/
-bookmarks + sync + markdown export). See [STUDY.md](STUDY.md) for the
+bookmarks + sync + markdown export, polish — big-library performance,
+tablet 2-pane reading, PDF password prompt, last-synced indicator).
+See [STUDY.md](STUDY.md) for the
 reference-app analysis that drove architecture decisions and [worklog.md](worklog.md)
 for the chronological build log.
 
@@ -90,7 +92,7 @@ cd ~/Applications/OpenCode/DocView
 
 ## Release APK (single artifact, rewritten every update)
 
-- Deliverable: **`releases/DocView.apk`** — arm64-only release build (v0.9.0+9 ≈ 33.2 MB),
+- Deliverable: **`releases/DocView.apk`** — arm64-only release build (v1.0.0+10 ≈ 33.4 MB),
   committed to git; regenerated and *overwritten* at the end of every change.
 - Command to reproduce: `~/flutter/bin/flutter build apk --release --split-per-abi`,
   then copy `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` → `releases/DocView.apk`.
@@ -98,7 +100,7 @@ cd ~/Applications/OpenCode/DocView
   (`app-x86_64-release.apk`) — never committed.
 - Version bumps: pubspec `version` + worklog note each update.
 
-### Test results at current build (0.9.0+9)
+### Test results at current build (1.0.0+10)
 
 Static: `flutter analyze` — 0 issues; `flutter test` — 63/63 pass
 (format detection, repository CRUD + soft delete + reflow saveProgress,
@@ -119,7 +121,7 @@ run via `tool/battery_all.sh` → per-AVD `tool/battery_one.sh <avd>`):
 | quick_phone | 36 | ✅ battery DOCX renders (ATD API 35 image never painted WebView — swapped to google_apis) |
 | old_phone | 30 | ✅ DOCX renders (reflow EPUB shows the graceful WebView-83 error screen) |
 | pixel_7 | 36 | ✅ DOCX renders + resume round-trip; XLSX/PPTX/ODT/RTF verified per-format |
-| pixel_tablet | 36 (landscape) | ✅ DOCX renders |
+| pixel_tablet | 36 (landscape) | ✅ DOCX renders in the **2-pane shell** (library stays live on the left) |
 
 Search batteries (single-AVD, `DOCVIEW_BATTERY_OPEN` + `DOCVIEW_BATTERY_SEARCH`
 defines — bar opens with the term pre-filled and searches automatically):
@@ -146,12 +148,20 @@ notes-push|notes-restore>`):
 | notes-push | `DOCVIEW_BATTERY_NOTE=epub` build: JS-simulated selection → highlight + note + bookmark → sync | ✅ server manifest carries annotations; list sheet renders all kinds |
 | notes-restore | notes-push then `pm clear` → boot pulls everything → note flow adds local annotations → sync | ✅ server annotations 3 → 6 → 9 across generations (bidirectional merge) |
 
+Big-library battery (single-AVD, `DOCVIEW_BATTERY_BIGLIB=200` +
+`DOCVIEW_BATTERY_OPEN=none`; script `tool/battery_biglib.sh <avd>`):
+
+| Run | Flow | Result |
+|---|---|---|
+| biglib | fresh install → 208-doc seed (batched imports) → grid capture → 4 fling scrolls | ✅ 0 FATAL / 0 app ANR; skipped-frames confined to the seed-import window, grid + scroll smooth; cold start ≈ 3.0 s |
+
 Battery build (`--dart-define=DOCVIEW_BATTERY=true`, optional
 `--dart-define=DOCVIEW_BATTERY_OPEN=<fmt>`, optional
 `--dart-define=DOCVIEW_BATTERY_SEARCH=<term>`, optional
 `--dart-define=DOCVIEW_BATTERY_DICT=<word>`, optional
 `--dart-define=DOCVIEW_BATTERY_SYNC=<url>`, optional
-`--dart-define=DOCVIEW_BATTERY_NOTE=epub`; `OPEN=none` imports the
+`--dart-define=DOCVIEW_BATTERY_NOTE=epub`, optional
+`--dart-define=DOCVIEW_BATTERY_BIGLIB=<n>`; `OPEN=none` imports the
 seeds but skips the deep-open for library-only batteries) auto-imports a
 bundled `assets/battery/mini.pdf` plus in-memory `battery.epub/txt/docx/
 xlsx/pptx/odt/rtf` through the real pipeline (asset → importBytes →
@@ -234,6 +244,25 @@ via the open-gate in `_openDoc` (cloud badge on cards), resets
 → snackbar). Battery-only: `DOCVIEW_BATTERY_SYNC=<url>` auto-configures
 the account; battery seeds are idempotent across boots (they embed zip
 timestamps, so sha256 dedupe alone would duplicate them per boot).
+
+**Phase 9 notes** (polish → 1.0.0): **Big-library performance** —
+`File(...).existsSync()` ran inside every `DocCard`/list-row build for
+the cloud badge (one stat() per card per frame) — replaced by a
+`cloudOnly` id set computed once per docs-list emission in the library
+state (yielding every 50 docs), passed down through cards/list/shelf;
+verified on a 208-doc battery (`battery_biglib.sh`: skipped-frames all
+inside the seed-import burst, grid + fling smooth). **Tablet 2-pane** —
+the reader routes are wrapped in a `ShellRoute`; at ≥840dp the shell
+shows the library live in a fixed left pane beside the reader navigator
+(open another book to swap the right pane instantly), below 840dp the
+reader is full-screen exactly as before. **PDF password** —
+`PdfViewer.file` now gets a `passwordProvider` that shows a modal
+password dialog (autofocus, obscure, cancel → `PdfPasswordException`
+→ viewer error state); repeated wrong attempts reopen the dialog with
+an "Incorrect password" title. **Last synced** — `SyncRunner.run`
+persists a success timestamp (`shared_preferences`), Settings shows a
+"Last synced: <relative>" line under the account tile (or "Never
+synced").
 
 **Phase 8 notes** (annotations): schema v6 adds `Annotations` —
 `uuid`, `documentId`, `kind` (highlight/note/bookmark), `anchor` (opaque

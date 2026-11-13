@@ -13,12 +13,18 @@ class DocCard extends StatelessWidget {
     required this.onOpen,
     required this.onLongPress,
     this.width,
+    this.cloudOnly = false,
   });
 
   final Document document;
   final VoidCallback onOpen;
   final VoidCallback onLongPress;
   final double? width;
+
+  /// True when the document file is not downloaded yet (synced metadata only).
+  /// Computed by the caller outside of the build phase — an `existsSync()` per
+  /// card per build turned into measurable jank on big libraries.
+  final bool cloudOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -95,7 +101,7 @@ class DocCard extends StatelessWidget {
                         ),
                       ),
                     // Cloud-only (synced metadata, file not downloaded yet).
-                    if (!File(document.storedPath).existsSync())
+                    if (cloudOnly)
                       Positioned(
                         top: 6,
                         left: 6,
