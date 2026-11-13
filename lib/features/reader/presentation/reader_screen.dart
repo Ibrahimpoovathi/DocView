@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,7 +13,11 @@ import '../../../core/design/widgets/empty_state.dart';
 import '../../../core/format/doc_format.dart';
 import '../../../core/storage/database.dart';
 import '../../library/presentation/providers.dart';
+import '../domain/annotations.dart';
 import '../domain/viewer_prefs.dart';
+import 'annotation_palette.dart';
+import 'annotation_sheets.dart';
+import 'annotations_list.dart';
 import 'reflow_screen.dart';
 import 'office_screens.dart';
 import 'reader_chrome.dart';
@@ -73,6 +79,12 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   final _searchCtrl = TextEditingController();
   Timer? _saveDebounce;
 
+  // Annotations: DB rows for this document; PDF page text cache for painting
+  // highlight rects (filled lazily per page — loadStructuredText is async
+  // and pagePaintCallbacks are sync).
+  List<Annotation> _annotations = const [];
+  final _pdfTextCache = <int, pdfrx.PdfPageText>{};
+
   @override
   void initState() {
     super.initState();
@@ -111,6 +123,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     await repo.markOpened(doc.id);
     final pos = await ref.read(readingRepositoryProvider).ensure(doc.id);
     if (!mounted) return;
+    if (doc.format == DocFormat.pdf) {
+      _annotations =
+          await ref.read(annotationsRepositoryProvider).listForDoc(doc.id);
+    }
+    if (!mounted) return;
     setState(() {
       _doc = doc;
       _colorMode = pos.colorMode;
@@ -141,6 +158,139 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     _saveDebounce?.cancel();
     _saveDebounce = Timer(const Duration(milliseconds: 600), () {
       ref.read(readingRepositoryProvider).savePage(_doc!.id, _pageNumber);
+    });
+  }
+
+  // --- annotations -------------------------------------------------------------
+
+  /// Lazily loads a page's structured text so the highlight painter can
+  /// map char indices to rects; triggers a repaint once loaded.
+  Future<void> _ensurePdfText(int pageNumber) async {
+    if (_pdfTextCache.containsKey(pageNumber)) return;
+    _pdfTextCache[pageNumber] =
+        await _ctl.document.pages[pageNumber - 1].loadStructuredText();
+    if (mounted) setState(() {});
+  }
+
+  /// Sync paint callback (pdfrx pagePaintCallbacks): draws highlight rects
+  /// for annotations on this page using cached page text. Consecutive chars
+  /// on the same visual line are grouped into a single rect.
+  void _paintPdfHighlights(
+    ui.Canvas canvas,
+    Rect pageRect,
+    pdfrx.PdfPage page,
+  ) {
+    final pageText = _pdfTextCache[page.pageNumber];
+    if (pageText == null) {
+      unawaited(_ensurePdfText(page.pageNumber));
+      return;
+    }
+    final paint = Paint();
+    for (final a in _annotations) {
+      if (a.kind != AnnotationKind.highlight) continue;
+      final anchor = AnnotationAnchor.fromJson(
+          jsonDecode(a.anchor) as Map<String, Object?>);
+      if (anchor.page != page.pageNumber ||
+          anchor.start == null ||
+          anchor.end == null) {
+        continue;
+      }
+      paint.color =
+          annotationColorOf(a.color ?? 'yellow').withValues(alpha: 0.35);
+      final charRects = pageText.charRects;
+      final end = anchor.end!.clamp(0, charRects.length);
+      var start = anchor.start!.clamp(0, charRects.length);
+      while (start < end) {
+        // Group chars sharing the same line (top) into one rect.
+        final first = charRects[start];
+        var last = start;
+        while (last + 1 < end &&
+            (charRects[last + 1].top - first.top).abs() < 1) {
+          last++;
+        }
+        final lineBox = pdfrx.PdfRect(
+          charRects[start].left,
+          charRects[start].top,
+          charRects[last].right,
+          charRects[start].bottom,
+        );
+        final rect = lineBox
+            .toRect(page: page, scaledPageSize: pageRect.size)
+            .translate(pageRect.left, pageRect.top);
+        canvas.drawRect(rect, paint);
+        start = last + 1;
+      }
+    }
+  }
+
+  Future<void> _createPdfAnnotation(
+    AnnotationKind kind, {
+    required List<pdfrx.PdfPageTextRange> ranges,
+    String? color,
+    String? note,
+  }) async {
+    final doc = _doc;
+    if (doc == null || ranges.isEmpty) return;
+    final first = ranges.first;
+    final ann = await ref.read(annotationsRepositoryProvider).create(
+          doc.id,
+          kind: kind,
+          anchor: AnnotationAnchor(
+            page: first.pageNumber,
+            start: first.start,
+            end: first.end,
+          ),
+          excerpt: first.text.trim(),
+          color: color,
+          note: note,
+        );
+    if (!mounted) return;
+    setState(() {
+      _annotations = [..._annotations, ann];
+    });
+    unawaited(_ensurePdfText(first.pageNumber));
+  }
+
+  bool _hasBookmarkOn(int page) => _annotations.any(
+        (a) =>
+            a.kind == AnnotationKind.bookmark &&
+            AnnotationAnchor.fromJson(
+                    jsonDecode(a.anchor) as Map<String, Object?>)
+                .page ==
+                page,
+      );
+
+  Future<void> _togglePdfBookmark() async {
+    final doc = _doc;
+    if (doc == null) return;
+    final existing = _annotations
+        .where((a) => a.kind == AnnotationKind.bookmark)
+        .where((a) =>
+            AnnotationAnchor.fromJson(
+                    jsonDecode(a.anchor) as Map<String, Object?>)
+                .page ==
+            _pageNumber)
+        .firstOrNull;
+    if (existing != null) {
+      await ref
+          .read(annotationsRepositoryProvider)
+          .softDelete(existing.id);
+      if (!mounted) return;
+      setState(() {
+        _annotations =
+            _annotations.where((a) => a.id != existing.id).toList();
+      });
+      return;
+    }
+    final ann = await ref.read(annotationsRepositoryProvider).create(
+          doc.id,
+          kind: AnnotationKind.bookmark,
+          anchor: AnnotationAnchor(page: _pageNumber),
+          excerpt: 'Page $_pageNumber',
+        );
+    if (!mounted) return;
+    setState(() {
+      _annotations = [..._annotations, ann];
     });
   }
 
@@ -245,6 +395,37 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
         ),
         backgroundColor: cs.surface,
         surfaceTintColor: Colors.transparent,
+        actions: [
+          if (_canSave)
+            IconButton(
+              icon: const Icon(Icons.format_list_bulleted_rounded),
+              tooltip: 'Annotations',
+              onPressed: () => showAnnotationsList(
+                context,
+                ref,
+                _doc!,
+                onJump: (ann) {
+                  final anchor = AnnotationAnchor.fromJson(
+                      jsonDecode(ann.anchor) as Map<String, Object?>);
+                  final page = anchor.page ?? _pageNumber;
+                  _ctl.goToPage(pageNumber: page);
+                },
+              ),
+            ),
+          if (_canSave)
+            IconButton(
+              icon: Icon(
+                _hasBookmarkOn(_pageNumber)
+                    ? Icons.bookmark_rounded
+                    : Icons.bookmark_border_rounded,
+                color: _hasBookmarkOn(_pageNumber) ? cs.primary : null,
+              ),
+              tooltip: _hasBookmarkOn(_pageNumber)
+                  ? 'Remove bookmark'
+                  : 'Bookmark this page',
+              onPressed: _togglePdfBookmark,
+            ),
+        ],
       ),
       body: Column(
         children: [
@@ -287,7 +468,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                     ? const Color(0xFF211D19)
                     : cs.surfaceContainerHighest.withValues(alpha: 0.75),
                 pageImageColorFilter: _filterFor(_colorMode),
-                pagePaintCallbacks: [?_searcher?.pageTextMatchPaintCallback],
+                pagePaintCallbacks: [
+                  ?_searcher?.pageTextMatchPaintCallback,
+                  _paintPdfHighlights,
+                ],
                 matchTextColor: Colors.white.withValues(alpha: 0.6),
                 activeMatchTextColor: Colors.white,
                 onPageChanged: (number) {
@@ -334,6 +518,50 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                         params.dismissContextMenu();
                         if (!mounted) return;
                         await showDictionarySheet(context, ref, text);
+                      },
+                    ),
+                  );
+                  items.insert(
+                    1,
+                    ContextMenuButtonItem(
+                      label: 'Highlight',
+                      onPressed: () async {
+                        final ranges = await params.textSelectionDelegate
+                            .getSelectedTextRanges();
+                        params.dismissContextMenu();
+                        if (!mounted || ranges.isEmpty) return;
+                        final color = await showHighlightColorPicker(context);
+                        if (color == null) return;
+                        await params.textSelectionDelegate.clearTextSelection();
+                        await _createPdfAnnotation(
+                          AnnotationKind.highlight,
+                          ranges: ranges,
+                          color: color,
+                        );
+                      },
+                    ),
+                  );
+                  items.insert(
+                    2,
+                    ContextMenuButtonItem(
+                      label: 'Add note',
+                      onPressed: () async {
+                        final ranges = await params.textSelectionDelegate
+                            .getSelectedTextRanges();
+                        params.dismissContextMenu();
+                        if (!mounted || ranges.isEmpty) return;
+                        final note = await promptNoteText(context);
+                        if (note == null || note.isEmpty) {
+                          await params.textSelectionDelegate
+                              .clearTextSelection();
+                          return;
+                        }
+                        await params.textSelectionDelegate.clearTextSelection();
+                        await _createPdfAnnotation(
+                          AnnotationKind.note,
+                          ranges: ranges,
+                          note: note,
+                        );
                       },
                     ),
                   );

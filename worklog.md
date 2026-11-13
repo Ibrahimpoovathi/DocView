@@ -566,3 +566,75 @@ ANR-free**.
 Releases/DocView.apk rebuilt: arm64 0.8.0+8 ≈ 33.2 MB. Open next:
 Phase 8 polish (big-library perf, tablet 2-pane, notes/highlights +
 export) or whatever the user picks.
+
+---
+
+## Phase 8 — Annotations: highlights, notes, bookmarks (0.9.0+9)
+
+**Decisions (user-approved):** fixed 5-color palette (no picker);
+office readers excluded (plain-text anchors are unstable); markdown-only
+export; battery = sync battery extended with a notes flow. Scope:
+PDF + reflow readers only.
+
+**Schema v6**: `Annotations` table (uuid, documentId, kind, anchor JSON,
+excerpt, note, color, createdAt, nullable updatedAt, tombstonedAt —
+`deletedAt`). Repository stamps `updatedAt` on every mutation; deletes
+are soft; `upsertRemote` merges LWW with deletion-dominant ties.
+
+**Reflow** (docview.html + reflow_screen): the selection bridge now
+serializes the settled DOM selection with `epubcfi.fromRange` and ships
+`{text, cfi}` — single-word selections keep opening the dictionary,
+multi-word selections open a floating action bar (palette dots +
+note). Highlights go through foliate `addAnnotation`, replayed per
+section on `create-overlay`, painted via `draw-annotation` →
+`Overlayer.highlight`; tapping a drawn highlight opens the editor sheet
+(color dots, note field, delete). Bookmarks toggle in the app bar at
+the current CFI.
+
+**PDF** (reader_screen): context menu gains Highlight (color sheet) and
+Add note; anchor = `{page, start, end}` char indices into pdfrx's
+deterministic `PdfPageText` (from `getSelectedTextRanges()`); a
+`pagePaintCallback` repaints line-grouped rects from `charRects`, with
+page text cached lazily (loadStructuredText is async, paint is sync).
+Bookmark toggle in the app bar at the current page.
+
+**Sync**: manifest v2 adds `annotations[]` (uuid + sha256 keyed). Same
+LWW + deletion-dominant-tie policy as documents. Two real bugs caught:
+(1) the tie path let a device resurrect its own just-deleted annotation
+from its own manifest echo — ties now keep whichever tombstone exists;
+(2) the test's "same second" premise failed silently because Drift
+stores DateTime at second precision while ISO-8601 round-trips keep
+microseconds — tie tests floor to whole seconds.
+
+**List & export**: annotations list sheet (grouped by kind, tap to
+jump, edit via the editor, color/delete hooks keep the reflow overlay
+in step), per-document Markdown export (excerpts + notes + page refs)
+through the file picker.
+
+**Tests: 63/63** (6 new: annotation repo CRUD round-trip, soft-delete
+visibility, update stamping, remote upsert LWW + deletion-dominant
+ties, annotation sync push/restore with tombstone propagation, and the
+same-second tie test). `flutter analyze` 0 issues.
+
+**Battery**: `DOCVIEW_BATTERY_NOTE=epub` — docview.html gains
+`docviewBatterySelect` (text-walker selection in the visible section →
+selectionchange → CFI bridge), the flow creates highlight + note +
+bookmark, syncs (retrying while the boot auto-sync holds the runner),
+and captures the annotations list. Verified runs: notes-push (server
+manifest carries annotations; list renders all kinds), notes-restore
+(pm clear → pull → local additions → server annotations 3 → 6 → 9
+across seed generations — bidirectional merge on device). 0 FATAL
+throughout. Seed idempotency guard hardened to match `battery.%` too
+(a partially-imported library without mini.pdf used to re-import).
+Standard baseline: all 4 AVDs FATAL- and ANR-free ("System UI isn't
+responding" popups observed in notes captures are emulator host-load
+noise — no app ANRs in logcat).
+
+One host gotcha re-learned: the wsgidav config must map the `/dav`
+prefix (`provider_mapping: {"/dav": ...}`) — a freshly regenerated
+config that mounted the share at `/` made the app's sync fail silently
+(404s) with zero FATALs; symptom was an empty server dir.
+
+Releases/DocView.apk rebuilt: arm64 0.9.0+9 ≈ 33.2 MB. Open next:
+Phase 9 polish — big-library perf, tablet 2-pane, PDF password prompt,
+"last synced" indicator, README promise audit.

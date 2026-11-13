@@ -16,12 +16,14 @@ optional user-owned WebDAV sync.
 | 5 | Search (in-doc + library FTS5), dictionary popup (offline + online) | Done |
 | 6 | Dictionary popup (offline StarDict + online fallback, tap-to-lookup) | Done |
 | 7 | WebDAV sync (books + progress + collections, on-demand download) | Done |
-| 8 | Polish: big-library perf, tablet 2-pane, notes/highlights + export | Planned |
+| 8 | Annotations: highlights/notes/bookmarks + sync + markdown export | Done |
+| 9 | Polish: big-library perf, tablet 2-pane, remaining promise gaps | Planned |
 
-Current build: **0.8.0** (Phases 0–7: shell, library, PDF reader, reflow
+Current build: **0.9.0** (Phases 0–8: shell, library, PDF reader, reflow
 readers, office readers, search — in-doc + FTS5 library full-text,
 dictionary popup — offline StarDict + online, WebDAV sync — manifest
-reconcile, on-demand downloads). See [STUDY.md](STUDY.md) for the
+reconcile, on-demand downloads, annotations — highlights/notes/
+bookmarks + sync + markdown export). See [STUDY.md](STUDY.md) for the
 reference-app analysis that drove architecture decisions and [worklog.md](worklog.md)
 for the chronological build log.
 
@@ -72,7 +74,8 @@ for the chronological build log.
 - **PDF:** pdfrx 2.x (MIT, pdfium) · **Reflow:** foliate-js in flutter_inappwebview
   (6.2.0-beta.3, pinned — see STUDY.md §4 for the AGP build saga)
 - **Office:** docx_file_viewer + docx_creator · excel_plus · office_oxide_ffi
-- **Sync (P6):** webdav_client (redirect-safe fork candidate) · **Import:** file_picker
+- **Sync (P6/P8):** webdav_client_plus 3.0.0 · flutter_secure_storage ·
+  **Import:** file_picker
 
 Licensing stance: MIT/Apache only (pdfrx avoids AGPL MuPDF; anx-reader's
 MIT line; no GPL engines embedded — ReadEra engine routes documented in STUDY.md §1).
@@ -87,7 +90,7 @@ cd ~/Applications/OpenCode/DocView
 
 ## Release APK (single artifact, rewritten every update)
 
-- Deliverable: **`releases/DocView.apk`** — arm64-only release build (v0.8.0+8 ≈ 33.2 MB),
+- Deliverable: **`releases/DocView.apk`** — arm64-only release build (v0.9.0+9 ≈ 33.2 MB),
   committed to git; regenerated and *overwritten* at the end of every change.
 - Command to reproduce: `~/flutter/bin/flutter build apk --release --split-per-abi`,
   then copy `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` → `releases/DocView.apk`.
@@ -95,9 +98,9 @@ cd ~/Applications/OpenCode/DocView
   (`app-x86_64-release.apk`) — never committed.
 - Version bumps: pubspec `version` + worklog note each update.
 
-### Test results at current build (0.8.0+8)
+### Test results at current build (0.9.0+9)
 
-Static: `flutter analyze` — 0 issues; `flutter test` — 55/55 pass
+Static: `flutter analyze` — 0 issues; `flutter test` — 63/63 pass
 (format detection, repository CRUD + soft delete + reflow saveProgress,
 import pipeline incl. dedupe-by-sha256, TXT→EPUB converter,
 PPTX/ODT/RTF extractors, empty-library widget test, FTS5 metadata/body
@@ -105,7 +108,8 @@ search + epub/docx text extraction + findTextHits, dictionary parser +
 history + MockClient online lookup, dictzip round-trip + StarDict ifo
 parsing + article decoding, sync manifest round-trip + push/pull
 restore + position LWW + tombstones + collection/tag merge against an
-in-memory fake WebDAV).
+in-memory fake WebDAV, annotation repository CRUD + remote upsert LWW
+(deletion-dominant ties) + annotation sync merge both directions).
 
 AVD battery (install, cold launch, screenshot review, FATAL/ANR logcat scan;
 run via `tool/battery_all.sh` → per-AVD `tool/battery_one.sh <avd>`):
@@ -131,19 +135,23 @@ defines — bar opens with the term pre-filled and searches automatically):
 
 Sync batteries (single-AVD, `DOCVIEW_BATTERY_SYNC` define; host runs
 `wsgidav` anonymously on :8080 → `/tmp/opencode/dav`, emulator reaches it
-at `10.0.2.2`; script `tool/battery_sync.sh <avd> <push|restore>`):
+at `10.0.2.2`; script `tool/battery_sync.sh <avd> <push|restore|
+notes-push|notes-restore>`):
 
 | Run | Flow | Result |
 |---|---|---|
 | push | fresh install → seeds imported → account auto-configured from define → boot-sync | ✅ server ends with manifest.json + 8 content-addressed books + cover |
 | restore | `pm clear` first (fresh device) → define re-saves account → boot-sync pulls | ✅ library repopulated (metadata + covers), cloud-only docs badged |
 | on-demand open | tap a cloud-badged doc | ✅ file downloads from server, reader opens (PPTX slide list) |
+| notes-push | `DOCVIEW_BATTERY_NOTE=epub` build: JS-simulated selection → highlight + note + bookmark → sync | ✅ server manifest carries annotations; list sheet renders all kinds |
+| notes-restore | notes-push then `pm clear` → boot pulls everything → note flow adds local annotations → sync | ✅ server annotations 3 → 6 → 9 across generations (bidirectional merge) |
 
 Battery build (`--dart-define=DOCVIEW_BATTERY=true`, optional
 `--dart-define=DOCVIEW_BATTERY_OPEN=<fmt>`, optional
 `--dart-define=DOCVIEW_BATTERY_SEARCH=<term>`, optional
 `--dart-define=DOCVIEW_BATTERY_DICT=<word>`, optional
-`--dart-define=DOCVIEW_BATTERY_SYNC=<url>`; `OPEN=none` imports the
+`--dart-define=DOCVIEW_BATTERY_SYNC=<url>`, optional
+`--dart-define=DOCVIEW_BATTERY_NOTE=epub`; `OPEN=none` imports the
 seeds but skips the deep-open for library-only batteries) auto-imports a
 bundled `assets/battery/mini.pdf` plus in-memory `battery.epub/txt/docx/
 xlsx/pptx/odt/rtf` through the real pipeline (asset → importBytes →
@@ -226,6 +234,39 @@ via the open-gate in `_openDoc` (cloud badge on cards), resets
 → snackbar). Battery-only: `DOCVIEW_BATTERY_SYNC=<url>` auto-configures
 the account; battery seeds are idempotent across boots (they embed zip
 timestamps, so sha256 dedupe alone would duplicate them per boot).
+
+**Phase 8 notes** (annotations): schema v6 adds `Annotations` —
+`uuid`, `documentId`, `kind` (highlight/note/bookmark), `anchor` (opaque
+JSON: reflow relocator `{"cfi": …}` or PDF char range
+`{"page","start","end"}`), `excerpt`, `note`, `color` (fixed 5-color
+palette, no free-form picker), `createdAt`, nullable `updatedAt` (sync
+LWW) and `deletedAt` (tombstones). **Reflow**: the foliate shell
+(docview.html) now serializes the settled DOM selection via
+`epubcfi.fromRange` and ships it alongside the text — single-word
+selections still open the dictionary, multi-word selections open a
+floating action bar (5 color dots → highlight, note icon → note).
+Highlights render through foliate's `addAnnotation` + `draw-annotation`
+→ `Overlayer.highlight` (CSS colors at .3 opacity, replayed per section
+on `create-overlay`); tapping a drawn highlight opens the editor sheet.
+**PDF**: the context menu gains Highlight/Add-note; anchors are
+`{page, start, end}` char indices into pdfrx's deterministic
+`PdfPageText`; a pagePaintCallback repaints rects from `charRects`
+(grouped per line), with page text cached lazily (`loadStructuredText`
+is async, paint callbacks are sync). **Bookmarks** are an annotation
+kind anchored at the current page (PDF app-bar toggle) or reflow
+location. **Sync**: manifest v2 carries annotations keyed
+uuid + sha256; merge is LWW by `updatedAt` with the same
+deletion-dominant tie rule as documents — a device never resurrects its
+own just-deleted annotation from its own earlier manifest echo (a bug
+the tie tests actually caught: Drift stores DateTime at second
+precision but ISO-8601 round-trips keep microseconds, so "same second"
+must be floored in tests). **Export**: the annotations list sheet
+exports per-document Markdown (excerpts + notes + page refs) via the
+file picker. Battery: `DOCVIEW_BATTERY_NOTE=epub` simulates a
+multi-word selection in JS (`docviewBatterySelect` — the visible
+section's text walker), creates highlight + note + bookmark, syncs, and
+captures the annotations list; the battery seed idempotency guard now
+matches `battery.%` names too (partial imports could lack `mini.pdf`).
 
 **Phase 4 notes**: DOCX = `docx_file_viewer` native widgets (search/zoom/
 selection); XLSX/XLS = `excel_plus` table reader (styled header, sheet

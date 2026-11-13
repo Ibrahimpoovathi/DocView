@@ -38,6 +38,8 @@ window.addEventListener('error', function (e) {
 
 <script type="module">
 import { makeBook } from './view.js'
+import { fromRange } from './epubcfi.js'
+import { Overlayer } from './overlayer.js'
 
 const params = new URLSearchParams(location.search)
 const src = params.get('src') ?? ''
@@ -89,6 +91,130 @@ const open = async () => {
   const book = await makeBook(src)
   await view.open(book)
 
+  // --- annotation layer ------------------------------------------------------
+  // foliate-view emits create-overlay when a section's overlay is (re)built;
+  // we replay this section's annotations into it. draw-annotation asks us to
+  // actually paint (Overlayer.highlight with a CSS color at .3 opacity).
+  // show-annotation fires when the user taps a drawn highlight.
+  const annotationsByIndex = new Map()
+  const annotationsByValue = new Map()
+
+  view.addEventListener('create-overlay', ({ detail }) => {
+    const { index } = detail
+    const list = annotationsByIndex.get(index)
+    if (list) for (const a of list) view.addAnnotation(a)
+  })
+  view.addEventListener('draw-annotation', ({ detail }) => {
+    const { draw, annotation } = detail
+    draw(Overlayer.highlight, { color: annotation.color })
+  })
+  view.addEventListener('show-annotation', ({ detail }) => {
+    const { value } = detail
+    const a = annotationsByValue.get(value)
+    notify('onReflowAnnotationTap', {
+      uuid: a?.uuid ?? null,
+      value,
+    })
+  })
+
+  window.docviewSetAnnotations = list => {
+    for (const a of list) {
+      annotationsByValue.set(a.value, a)
+      const i = a.index
+      const cur = annotationsByIndex.get(i)
+      if (cur) cur.push(a)
+      else annotationsByIndex.set(i, [a])
+    }
+    // Sections already rendered (the first one) need a manual pass.
+    for (const { index } of view.renderer?.getContents?.() ?? []) {
+      const list2 = annotationsByIndex.get(index)
+      if (list2) for (const a of list2) view.addAnnotation(a)
+    }
+  }
+
+  window.docviewAddAnnotation = async ({ value, color, note, uuid }) => {
+    const a = { value, color, note, uuid }
+    const res = await view.addAnnotation(a)
+    a.index = res?.index
+    annotationsByValue.set(value, a)
+    const i = a.index
+    const cur = annotationsByIndex.get(i)
+    if (cur) cur.push(a)
+    else if (i != null) annotationsByIndex.set(i, [a])
+  }
+
+  window.docviewRemoveAnnotation = async value => {
+    const a = annotationsByValue.get(value)
+    if (!a) return
+    await view.addAnnotation(a, true)
+    annotationsByValue.delete(value)
+    const list = annotationsByIndex.get(a.index)
+    if (list) {
+      const i = list.indexOf(a)
+      if (i >= 0) list.splice(i, 1)
+    }
+  }
+
+  // Re-color in place: remove the old draw and add the updated annotation
+  // (same CFI value, new color) — overlays redraw via draw-annotation.
+  window.docviewUpdateAnnotation = async ({ value, color, note, uuid }) => {
+    const old = annotationsByValue.get(value)
+    if (old) await view.addAnnotation(old, true)
+    const a = { value, color, note, uuid }
+    const res = await view.addAnnotation(a)
+    a.index = res?.index
+    annotationsByValue.set(value, a)
+    const list = annotationsByIndex.get(a.index)
+    if (list) {
+      const i = list.indexOf(old)
+      if (i >= 0) list[i] = a
+    }
+  }
+
+  window.docviewShowAnnotation = value =>
+    view.showAnnotation(annotationsByValue.get(value) ?? { value })
+
+  // Collapse the native text selection after an annotation action.
+  window.docviewClearSelection = () => {
+    const contents = view.renderer?.getContents?.() ?? []
+    for (const { doc } of contents) {
+      doc.getSelection?.()?.removeAllRanges?.()
+    }
+  }
+
+  // Battery hook: programmatically select a run of text in the first
+  // rendered section so the selection bridge produces a CFI for the
+  // highlight/note flow. Fires selectionchange like a real drag would.
+  window.docviewBatterySelect = () => {
+    const contents = view.renderer?.getContents?.() ?? []
+    if (contents.length === 0) return false
+    // Prefer the currently visible section (resume may start mid-book).
+    const currentIndex = view.currentLocation?.index
+    const target =
+      (currentIndex != null
+        ? contents.find(c => c.index === currentIndex)
+        : null) ?? contents[contents.length - 1]
+    if (!target?.doc) return false
+    const sel = target.doc.getSelection?.()
+    if (!sel) return false
+    const walker = target.doc.createTreeWalker(
+      target.doc.body,
+      NodeFilter.SHOW_TEXT,
+    )
+    let node
+    while ((node = walker.nextNode())) {
+      if ((node.textContent ?? '').trim().length >= 80) {
+        sel.removeAllRanges()
+        const range = target.doc.createRange()
+        range.setStart(node, 5)
+        range.setEnd(node, Math.min(75, node.textContent.length))
+        sel.addRange(range)
+        return true
+      }
+    }
+    return false
+  }
+
   view.addEventListener('load', ({ detail }) => {
     const doc = detail.doc
     if (!doc?.head) return
@@ -101,7 +227,9 @@ const open = async () => {
   // Text selection → dictionary lookup bridge. foliate renders each section
   // into its own document (iframe contentDoc), so the hook must be attached
   // per 'load' event. Debounced: selectionchange fires continuously while
-  // dragging; the settled selection is what reaches Flutter.
+  // dragging; the settled selection is what reaches Flutter. The CFI range
+  // (annotation anchor) travels along — null when the engine cannot
+  // serialize the selection (fixed-layout/CBZ).
   const attachSelectionBridge = doc => {
     if (doc.__docviewSelectionHooked) return
     doc.__docviewSelectionHooked = true
@@ -110,7 +238,15 @@ const open = async () => {
       doc.__docviewSelTimer = setTimeout(() => {
         const sel = doc.getSelection?.()
         const text = sel ? String(sel) : ''
-        if (text) notify('onReflowSelection', { text })
+        if (!text) return
+        let cfi = null
+        try {
+          const range = sel.getRangeAt(0)
+          cfi = fromRange(range)
+        } catch (e) {
+          cfi = null
+        }
+        notify('onReflowSelection', { text, cfi })
       }, 350)
     })
   }

@@ -399,3 +399,56 @@ final class ReadingRepositoryProvider
 }
 
 String _$readingRepositoryHash() => r'a27adad65c60146a5047502710ac71ae80b60626';
+
+/// Per-document annotations (highlights, notes, bookmarks).
+
+@ProviderFor(annotationsRepository)
+final annotationsRepositoryProvider = AnnotationsRepositoryProvider._();
+
+/// Per-document annotations (highlights, notes, bookmarks).
+
+final class AnnotationsRepositoryProvider
+    extends
+        $FunctionalProvider<
+          AnnotationsRepository,
+          AnnotationsRepository,
+          AnnotationsRepository
+        >
+    with $Provider<AnnotationsRepository> {
+  /// Per-document annotations (highlights, notes, bookmarks).
+  AnnotationsRepositoryProvider._()
+    : super(
+        from: null,
+        argument: null,
+        retry: null,
+        name: r'annotationsRepositoryProvider',
+        isAutoDispose: false,
+        dependencies: null,
+        $allTransitiveDependencies: null,
+      );
+
+  @override
+  String debugGetCreateSourceHash() => _$annotationsRepositoryHash();
+
+  @$internal
+  @override
+  $ProviderElement<AnnotationsRepository> $createElement(
+    $ProviderPointer pointer,
+  ) => $ProviderElement(pointer);
+
+  @override
+  AnnotationsRepository create(Ref ref) {
+    return annotationsRepository(ref);
+  }
+
+  /// {@macro riverpod.override_with_value}
+  Override overrideWithValue(AnnotationsRepository value) {
+    return $ProviderOverride(
+      origin: this,
+      providerOverride: $SyncValueProvider<AnnotationsRepository>(value),
+    );
+  }
+}
+
+String _$annotationsRepositoryHash() =>
+    r'8b8fdd95d2758cee2491a4f3fa507220bae17938';

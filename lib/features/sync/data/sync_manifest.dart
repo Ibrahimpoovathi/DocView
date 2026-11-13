@@ -6,10 +6,11 @@ import 'package:docview/core/storage/database.dart';
 /// for collections/tags) so the manifest reconciles identically on any
 /// device regardless of locally generated ids/uuids.
 class SyncManifest {
-  static const int version = 1;
+  static const int version = 2;
 
   final List<SyncDoc> documents;
   final List<SyncPosition> positions;
+  final List<SyncAnnotation> annotations;
   final List<String> collections;
   final List<String> tags;
   final List<SyncLink> documentCollections;
@@ -19,6 +20,7 @@ class SyncManifest {
   const SyncManifest({
     required this.documents,
     required this.positions,
+    this.annotations = const [],
     required this.collections,
     required this.tags,
     required this.documentCollections,
@@ -31,6 +33,7 @@ class SyncManifest {
         'syncedAt': syncedAt?.toIso8601String(),
         'documents': documents.map((d) => d.toJson()).toList(),
         'positions': positions.map((p) => p.toJson()).toList(),
+        'annotations': annotations.map((a) => a.toJson()).toList(),
         'collections': collections,
         'tags': tags,
         'documentCollections': documentCollections.map((l) => l.toJson()).toList(),
@@ -43,6 +46,10 @@ class SyncManifest {
         .toList();
     final positions = (json['positions'] as List<dynamic>? ?? const [])
         .map((e) => SyncPosition.fromJson(e as Map<String, dynamic>))
+        .toList();
+    // v1 manifests carry no annotations.
+    final annotations = (json['annotations'] as List<dynamic>? ?? const [])
+        .map((e) => SyncAnnotation.fromJson(e as Map<String, dynamic>))
         .toList();
     final collections = (json['collections'] as List<dynamic>? ?? const [])
         .cast<String>()
@@ -58,6 +65,7 @@ class SyncManifest {
     return SyncManifest(
       documents: docs,
       positions: positions,
+      annotations: annotations,
       collections: collections,
       tags: tags,
       documentCollections: docCollections,
@@ -65,6 +73,78 @@ class SyncManifest {
       syncedAt: syncedAtRaw == null ? null : DateTime.tryParse(syncedAtRaw),
     );
   }
+}
+
+/// One annotation in the manifest, keyed by uuid + document sha256.
+class SyncAnnotation {
+  final String uuid;
+  final String sha256;
+  final String kind;
+  final String anchor;
+
+  /// Raw anchor JSON (opaque to the sync layer).
+  final String? excerpt;
+  final String? note;
+  final String? color;
+  final DateTime? createdAt;
+  final DateTime? updatedAt;
+  final DateTime? deletedAt;
+
+  const SyncAnnotation({
+    required this.uuid,
+    required this.sha256,
+    required this.kind,
+    required this.anchor,
+    required this.excerpt,
+    required this.note,
+    required this.color,
+    required this.createdAt,
+    required this.updatedAt,
+    required this.deletedAt,
+  });
+
+  factory SyncAnnotation.fromRow(String sha256, Annotation row) =>
+      SyncAnnotation(
+        uuid: row.uuid,
+        sha256: sha256,
+        kind: row.kind.name,
+        anchor: row.anchor,
+        excerpt: row.excerpt,
+        note: row.note,
+        color: row.color,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+        deletedAt: row.deletedAt,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'uuid': uuid,
+        'sha256': sha256,
+        'kind': kind,
+        'anchor': anchor,
+        'excerpt': excerpt,
+        'note': note,
+        'color': color,
+        'createdAt': createdAt?.toIso8601String(),
+        'updatedAt': updatedAt?.toIso8601String(),
+        'deletedAt': deletedAt?.toIso8601String(),
+      };
+
+  static SyncAnnotation fromJson(Map<String, dynamic> json) => SyncAnnotation(
+        uuid: json['uuid'] as String,
+        sha256: json['sha256'] as String,
+        kind: json['kind'] as String? ?? 'highlight',
+        anchor: json['anchor'] as String? ?? '{}',
+        excerpt: json['excerpt'] as String?,
+        note: json['note'] as String?,
+        color: json['color'] as String?,
+        createdAt: _dt(json['createdAt']),
+        updatedAt: _dt(json['updatedAt']),
+        deletedAt: _dt(json['deletedAt']),
+      );
+
+  static DateTime? _dt(Object? raw) =>
+      raw is String ? DateTime.tryParse(raw) : null;
 }
 
 /// One document in the manifest. `sha256` is the cross-device identity;

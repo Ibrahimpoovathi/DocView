@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../../core/storage/database.dart';
+import '../../reader/data/annotations_repository.dart';
 import '../../reader/data/reading_repository.dart';
 import '../data/import_service.dart';
 import '../data/library_repository.dart';
@@ -114,3 +115,8 @@ class ImportRunner extends _$ImportRunner {
 @Riverpod(keepAlive: true)
 ReadingRepository readingRepository(Ref ref) =>
     ReadingRepository(ref.watch(appDatabaseProvider));
+
+/// Per-document annotations (highlights, notes, bookmarks).
+@Riverpod(keepAlive: true)
+AnnotationsRepository annotationsRepository(Ref ref) =>
+    AnnotationsRepository(ref.watch(appDatabaseProvider));

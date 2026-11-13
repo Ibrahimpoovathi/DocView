@@ -71,10 +71,12 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
   /// exercises the new readers.
   Future<void> _batterySeed() async {
     // Idempotent across boots: the generated seeds embed zip timestamps, so
-    // their sha256 differs per boot — skip when a previous generation is
-    // already in the library (prevents boot-2 duplicates during sync runs).
+    // their sha256 differs per boot — skip when any previous generation is
+    // already in the library (prevents boot-2 duplicates during sync runs;
+    // partial earlier imports may lack mini.pdf but carry battery.* seeds).
     final already = await ref.read(appDatabaseProvider).customSelect(
-          "SELECT COUNT(*) c FROM documents WHERE original_name = 'mini.pdf'",
+          "SELECT COUNT(*) c FROM documents WHERE original_name = 'mini.pdf'"
+          " OR original_name LIKE 'battery.%'",
         ).getSingle();
     if ((already.data['c'] as int?) != 0) return;
     final data = await rootBundle.load('assets/battery/mini.pdf');

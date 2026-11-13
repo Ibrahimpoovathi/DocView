@@ -27,6 +27,12 @@ const batteryDictWord = String.fromEnvironment('DOCVIEW_BATTERY_DICT');
 /// Credentials are fixed battery dummies; empty disables the sync battery.
 const batterySyncUrl = String.fromEnvironment('DOCVIEW_BATTERY_SYNC');
 
+/// Battery-only: annotation flow on reader open
+/// (`--dart-define=DOCVIEW_BATTERY_NOTE=epub`). Simulates a multi-word
+/// selection in the reflow reader, creates a highlight + note + bookmark,
+/// then opens the annotations list for screenshot verification.
+const batteryNoteFlow = String.fromEnvironment('DOCVIEW_BATTERY_NOTE');
+
 final router = GoRouter(
   initialLocation: '/library',
   routes: [

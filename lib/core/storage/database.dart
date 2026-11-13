@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 
 import '../../core/format/doc_format.dart';
+import '../../features/reader/domain/annotations.dart';
 import '../../features/reader/domain/viewer_prefs.dart';
 
 part 'database.g.dart';
@@ -90,6 +91,36 @@ class ReadingPositions extends Table {
 }
 
 // ---------------------------------------------------------------------------
+// Annotations (highlights / notes / bookmarks)
+// ---------------------------------------------------------------------------
+
+class Annotations extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get uuid => text().unique()();
+  IntColumn get documentId => integer().references(Documents, #id)();
+  TextColumn get kind => textEnum<AnnotationKind>()();
+
+  /// Renderer-specific anchor JSON (see [AnnotationAnchor]).
+  TextColumn get anchor => text()();
+
+  /// Quoted text the annotation covers (null for bookmarks).
+  TextColumn get excerpt => text().nullable()();
+
+  /// User note attached to the annotation (highlights may carry one).
+  TextColumn get note => text().nullable()();
+
+  /// Palette key from [annotationPalette] (highlights only).
+  TextColumn get color => text().nullable()();
+
+  DateTimeColumn get createdAt => dateTime().clientDefault(() => DateTime.now())();
+
+  /// Last local annotation mutation — last-writer-wins during sync.
+  /// Null on rows created before v6 = oldest.
+  DateTimeColumn get updatedAt => dateTime().nullable()();
+  DateTimeColumn get deletedAt => dateTime().nullable()();
+}
+
+// ---------------------------------------------------------------------------
 // Database
 // ---------------------------------------------------------------------------
 
@@ -108,13 +139,14 @@ const ftsBackfillSql =
     'WHERE deleted_at IS NULL';
 
 @DriftDatabase(tables: [
-  Documents, Collections, DocumentCollections, Tags, DocumentTags, ReadingPositions,
+  Documents, Collections, DocumentCollections, Tags, DocumentTags,
+  ReadingPositions, Annotations,
 ])
 class AppDatabase extends _$AppDatabase {
   AppDatabase(super.e);
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -141,6 +173,9 @@ class AppDatabase extends _$AppDatabase {
             // Nullable column: safe ALTER ADD COLUMN, legacy rows stay NULL
             // (= oldest in sync LWW comparisons until next mutation).
             await m.addColumn(documents, documents.updatedAt);
+          }
+          if (from < 6) {
+            await m.createTable(annotations);
           }
         },
       );

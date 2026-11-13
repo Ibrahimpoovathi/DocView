@@ -1,23 +1,35 @@
 #!/usr/bin/env bash
-# DocView — WebDAV sync battery (Phase 7).
+# DocView — WebDAV sync battery (Phase 7/8).
 #
 # Requires the caller to have built the battery APK first with:
 #   --dart-define=DOCVIEW_BATTERY=true
 #   --dart-define=DOCVIEW_BATTERY_SYNC=http://10.0.2.2:8080/dav/
-#   --dart-define=DOCVIEW_BATTERY_OPEN=none
+#   --dart-define=DOCVIEW_BATTERY_OPEN=none            (push/restore)
+# or, for the annotation battery (DOCVIEW_BATTERY_NOTE=epub):
+#   --dart-define=DOCVIEW_BATTERY_OPEN=epub so a reflow reader opens and
+#   the note flow runs (highlight + note + bookmark → sync → list sheet).
 #
 # Modes:
-#   push    — fresh install: seed-imports books, configures the WebDAV
-#             account from the define, boot-syncs (push). Two boots give
-#             sync time to settle; server should end with manifest+books.
-#   restore — pm clear first (fresh device): boot re-saves the account from
-#             the define and pulls the library down (cloud-only docs).
+#   push / notes-push — fresh install: seed-imports books, configures the
+#             WebDAV account from the define, boot-syncs (push); the notes
+#             variant then opens the EPUB, creates annotations and syncs
+#             them up before capturing the annotations list.
+#   restore / notes-restore — pm clear first (fresh device): boot re-saves
+#             the account from the define and pulls the library (+ any
+#             annotations pushed by the notes-push run); the notes variant
+#             adds local annotations on top and captures the list.
 #
 # Host WebDAV (wsgidav) must be running: 0.0.0.0:8080 → /tmp/opencode/dav.
 set -u
 
-NAME="${1:?usage: battery_sync.sh <avd-name> <push|restore>}"
-MODE="${2:?usage: battery_sync.sh <avd-name> <push|restore>}"
+NAME="${1:?usage: battery_sync.sh <avd-name> <push|restore|notes-push|notes-restore>}"
+MODE="${2:?usage: battery_sync.sh <avd-name> <push|restore|notes-push|notes-restore>}"
+NOTES=0
+case "$MODE" in
+  notes-push)    MODE=push;    NOTES=1 ;;
+  notes-restore) MODE=restore; NOTES=1 ;;
+esac
+BOOT_SLEEP=$(( NOTES ? 80 : 35 ))
 PROJ=/home/pseudo/Applications/OpenCode/DocView
 OUT=/tmp/opencode/avd_out
 ADB=/opt/android-sdk/platform-tools/adb
@@ -35,7 +47,7 @@ log() { echo "== $NAME/$MODE $(date) == $1" >> "$OUT/${NAME}_sync.log"; }
 kill_emus; kill_daemons; sleep 2
 log "boot"
 "$EMU" -avd "$NAME" -no-window -no-snapshot -no-boot-anim -accel on \
-  -gpu swiftshader_indirect -memory 2048 >> /tmp/opencode/emu_$NAME.log 2>&1 &
+  -gpu swiftshader_indirect -memory 3072 >> /tmp/opencode/emu_$NAME.log 2>&1 &
 sleep 30
 "$ADB" wait-for-device
 for i in $(seq 1 120); do
@@ -58,7 +70,7 @@ fi
 
 "$ADB" logcat -c
 "$ADB" shell am start -n com.docview.docview/.MainActivity
-sleep 35   # seed import + (push|pull) sync cycle
+sleep $BOOT_SLEEP   # seed import + sync cycle (+ note flow in notes runs)
 "$ADB" exec-out screencap -p > "$OUT/$NAME.sync_$MODE.png"
 "$ADB" logcat -d > "$OUT/$NAME.sync_$MODE.logcat"
 log "first capture done"
@@ -67,7 +79,7 @@ log "first capture done"
 "$ADB" shell am force-stop com.docview.docview
 sleep 2
 "$ADB" shell am start -n com.docview.docview/.MainActivity
-sleep 18
+sleep 25
 "$ADB" exec-out screencap -p > "$OUT/$NAME.sync_${MODE}2.png"
 "$ADB" logcat -d > "$OUT/$NAME.sync_${MODE}2.logcat"
 log "second capture done"

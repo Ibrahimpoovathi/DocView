@@ -6,6 +6,8 @@ import 'package:docview/features/library/data/import_service.dart';
 import 'package:docview/features/library/data/library_repository.dart';
 import 'package:docview/features/library/domain/library_query.dart';
 import 'package:docview/features/library/presentation/providers.dart';
+import 'package:docview/features/reader/data/annotations_repository.dart';
+import 'package:docview/features/reader/domain/annotations.dart';
 import 'package:docview/features/reader/domain/viewer_prefs.dart';
 import 'package:docview/features/sync/data/sync_engine.dart';
 import 'package:docview/features/sync/data/webdav_sync.dart';
@@ -313,6 +315,128 @@ void main() {
             ..where((t) => t.id.equals(tags.single)))
           .getSingle();
       expect(tag.name, 'todo');
+    });
+  });
+
+  group('annotations sync', () {
+    test('device A highlights, device B restores annotation by uuid', () async {
+      final dav = FakeWebdav();
+      final a = device(dav);
+      final src = File('${tmp.path}/annot.epub')..writeAsBytesSync([1, 2, 3]);
+      await a.importer.importSources([src.path]);
+      final doc = await a.doc();
+      final annRepo = AnnotationsRepository(a.db);
+      await annRepo.create(
+        doc.id,
+        kind: AnnotationKind.highlight,
+        anchor: AnnotationAnchor(cfi: 'epubcfi(/6/2!4:0-4:9)'),
+        excerpt: 'silver ribbons',
+        color: 'yellow',
+      );
+      await a.engine().run();
+
+      final b = device(dav);
+      await b.importer.importSources([src.path]);
+      await b.engine().run();
+      final bDoc = await b.doc();
+      final rows = await AnnotationsRepository(b.db).listForDoc(bDoc.id);
+      expect(rows, hasLength(1));
+      expect(rows.single.kind, AnnotationKind.highlight);
+      expect(rows.single.excerpt, 'silver ribbons');
+      expect(rows.single.color, 'yellow');
+
+      // Deleting on A propagates as a tombstone to B.
+      await annRepo.softDelete((await annRepo.listForDoc(doc.id)).first.id);
+      await a.engine().run();
+      await b.engine().run();
+      final bRows = await AnnotationsRepository(b.db).listForDoc(bDoc.id);
+      expect(bRows, isEmpty);
+      final raw = await (b.db.select(b.db.annotations)
+            ..where((x) => x.documentId.equals(bDoc.id)))
+          .getSingle();
+      expect(raw.deletedAt, isNotNull);
+    });
+
+    test('newer remote annotation wins; same-second tie stays local', () async {
+      final dav = FakeWebdav();
+      final a = device(dav);
+      final src = File('${tmp.path}/lww.epub')..writeAsBytesSync([1, 2, 3]);
+      await a.importer.importSources([src.path]);
+      final doc = await a.doc();
+
+      // Remote manifest: a newer annotation for the same doc, plus a
+      // same-second tie with different content.
+      // Same-second tie (Drift stores DateTime at second precision): floor
+      // to whole seconds so both sides serialize identically.
+      final tieTime = DateTime.fromMillisecondsSinceEpoch(
+          (DateTime.now().millisecondsSinceEpoch ~/ 1000) * 1000);
+      final note = AnnotationsRepository(a.db);
+      final local = await note.create(
+        doc.id,
+        kind: AnnotationKind.note,
+        anchor: AnnotationAnchor(cfi: 'epubcfi(/6/2!4:0)'),
+        note: 'keep me',
+        createdAt: tieTime,
+      );
+      // Force the same updatedAt second (Drift stores DateTime at seconds).
+      await (a.db.update(a.db.annotations)
+            ..where((x) => x.id.equals(local.id)))
+          .write(AnnotationsCompanion(
+        updatedAt: Value(tieTime),
+      ));
+
+      final manifest = {
+        'version': 2,
+        'documents': [
+          {
+            'sha256': doc.sha256,
+            'uuid': doc.uuid,
+            'title': doc.title,
+            'format': 'epub',
+            'favourite': false,
+            'addedAt': doc.addedAt.toIso8601String(),
+          }
+        ],
+        'positions': <Object?>[],
+        'annotations': [
+          {
+            'uuid': local.uuid,
+            'sha256': doc.sha256,
+            'kind': 'note',
+            'anchor': '{"cfi":"epubcfi(/6/2!8:0)"}',
+            'note': 'overwrite attempt',
+            'updatedAt': tieTime.toIso8601String(),
+          },
+          {
+            'uuid': 'remote-newer',
+            'sha256': doc.sha256,
+            'kind': 'highlight',
+            'anchor': '{"cfi":"epubcfi(/6/2!12:0-12:6)"}',
+            'color': 'green',
+            'updatedAt':
+                tieTime.add(const Duration(seconds: 5)).toIso8601String(),
+          },
+        ],
+        'collections': <Object?>[],
+        'tags': <Object?>[],
+        'documentCollections': <Object?>[],
+        'documentTags': <Object?>[],
+      };
+      dav.manifest = manifest;
+      await a.engine().run();
+
+      final rows = await AnnotationsRepository(a.db).listForDoc(doc.id);
+      // Tie kept the local note; the strictly-newer remote highlight landed.
+      expect(
+        rows.map((r) => r.note ?? r.excerpt),
+        contains('keep me'),
+      );
+      expect(rows.where((r) => r.kind == AnnotationKind.highlight),
+          hasLength(1));
+      expect(
+        rows.where((r) => r.kind == AnnotationKind.note).single.note,
+        'keep me',
+      );
     });
   });
 }

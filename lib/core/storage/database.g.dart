@@ -2407,6 +2407,667 @@ class ReadingPositionsCompanion extends UpdateCompanion<ReadingPosition> {
   }
 }
 
+class $AnnotationsTable extends Annotations
+    with TableInfo<$AnnotationsTable, Annotation> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $AnnotationsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    hasAutoIncrement: true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'PRIMARY KEY AUTOINCREMENT',
+    ),
+  );
+  static const VerificationMeta _uuidMeta = const VerificationMeta('uuid');
+  @override
+  late final GeneratedColumn<String> uuid = GeneratedColumn<String>(
+    'uuid',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'),
+  );
+  static const VerificationMeta _documentIdMeta = const VerificationMeta(
+    'documentId',
+  );
+  @override
+  late final GeneratedColumn<int> documentId = GeneratedColumn<int>(
+    'document_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES documents (id)',
+    ),
+  );
+  @override
+  late final GeneratedColumnWithTypeConverter<AnnotationKind, String> kind =
+      GeneratedColumn<String>(
+        'kind',
+        aliasedName,
+        false,
+        type: DriftSqlType.string,
+        requiredDuringInsert: true,
+      ).withConverter<AnnotationKind>($AnnotationsTable.$converterkind);
+  static const VerificationMeta _anchorMeta = const VerificationMeta('anchor');
+  @override
+  late final GeneratedColumn<String> anchor = GeneratedColumn<String>(
+    'anchor',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _excerptMeta = const VerificationMeta(
+    'excerpt',
+  );
+  @override
+  late final GeneratedColumn<String> excerpt = GeneratedColumn<String>(
+    'excerpt',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _noteMeta = const VerificationMeta('note');
+  @override
+  late final GeneratedColumn<String> note = GeneratedColumn<String>(
+    'note',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _colorMeta = const VerificationMeta('color');
+  @override
+  late final GeneratedColumn<String> color = GeneratedColumn<String>(
+    'color',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    clientDefault: () => DateTime.now(),
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> deletedAt = GeneratedColumn<DateTime>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    uuid,
+    documentId,
+    kind,
+    anchor,
+    excerpt,
+    note,
+    color,
+    createdAt,
+    updatedAt,
+    deletedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'annotations';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<Annotation> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('uuid')) {
+      context.handle(
+        _uuidMeta,
+        uuid.isAcceptableOrUnknown(data['uuid']!, _uuidMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_uuidMeta);
+    }
+    if (data.containsKey('document_id')) {
+      context.handle(
+        _documentIdMeta,
+        documentId.isAcceptableOrUnknown(data['document_id']!, _documentIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_documentIdMeta);
+    }
+    if (data.containsKey('anchor')) {
+      context.handle(
+        _anchorMeta,
+        anchor.isAcceptableOrUnknown(data['anchor']!, _anchorMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_anchorMeta);
+    }
+    if (data.containsKey('excerpt')) {
+      context.handle(
+        _excerptMeta,
+        excerpt.isAcceptableOrUnknown(data['excerpt']!, _excerptMeta),
+      );
+    }
+    if (data.containsKey('note')) {
+      context.handle(
+        _noteMeta,
+        note.isAcceptableOrUnknown(data['note']!, _noteMeta),
+      );
+    }
+    if (data.containsKey('color')) {
+      context.handle(
+        _colorMeta,
+        color.isAcceptableOrUnknown(data['color']!, _colorMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  Annotation map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return Annotation(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      uuid: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}uuid'],
+      )!,
+      documentId: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}document_id'],
+      )!,
+      kind: $AnnotationsTable.$converterkind.fromSql(
+        attachedDatabase.typeMapping.read(
+          DriftSqlType.string,
+          data['${effectivePrefix}kind'],
+        )!,
+      ),
+      anchor: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}anchor'],
+      )!,
+      excerpt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}excerpt'],
+      ),
+      note: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}note'],
+      ),
+      color: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}color'],
+      ),
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      ),
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}deleted_at'],
+      ),
+    );
+  }
+
+  @override
+  $AnnotationsTable createAlias(String alias) {
+    return $AnnotationsTable(attachedDatabase, alias);
+  }
+
+  static JsonTypeConverter2<AnnotationKind, String, String> $converterkind =
+      const EnumNameConverter<AnnotationKind>(AnnotationKind.values);
+}
+
+class Annotation extends DataClass implements Insertable<Annotation> {
+  final int id;
+  final String uuid;
+  final int documentId;
+  final AnnotationKind kind;
+
+  /// Renderer-specific anchor JSON (see [AnnotationAnchor]).
+  final String anchor;
+
+  /// Quoted text the annotation covers (null for bookmarks).
+  final String? excerpt;
+
+  /// User note attached to the annotation (highlights may carry one).
+  final String? note;
+
+  /// Palette key from [annotationPalette] (highlights only).
+  final String? color;
+  final DateTime createdAt;
+
+  /// Last local annotation mutation — last-writer-wins during sync.
+  /// Null on rows created before v6 = oldest.
+  final DateTime? updatedAt;
+  final DateTime? deletedAt;
+  const Annotation({
+    required this.id,
+    required this.uuid,
+    required this.documentId,
+    required this.kind,
+    required this.anchor,
+    this.excerpt,
+    this.note,
+    this.color,
+    required this.createdAt,
+    this.updatedAt,
+    this.deletedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['uuid'] = Variable<String>(uuid);
+    map['document_id'] = Variable<int>(documentId);
+    {
+      map['kind'] = Variable<String>(
+        $AnnotationsTable.$converterkind.toSql(kind),
+      );
+    }
+    map['anchor'] = Variable<String>(anchor);
+    if (!nullToAbsent || excerpt != null) {
+      map['excerpt'] = Variable<String>(excerpt);
+    }
+    if (!nullToAbsent || note != null) {
+      map['note'] = Variable<String>(note);
+    }
+    if (!nullToAbsent || color != null) {
+      map['color'] = Variable<String>(color);
+    }
+    map['created_at'] = Variable<DateTime>(createdAt);
+    if (!nullToAbsent || updatedAt != null) {
+      map['updated_at'] = Variable<DateTime>(updatedAt);
+    }
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt);
+    }
+    return map;
+  }
+
+  AnnotationsCompanion toCompanion(bool nullToAbsent) {
+    return AnnotationsCompanion(
+      id: Value(id),
+      uuid: Value(uuid),
+      documentId: Value(documentId),
+      kind: Value(kind),
+      anchor: Value(anchor),
+      excerpt: excerpt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(excerpt),
+      note: note == null && nullToAbsent ? const Value.absent() : Value(note),
+      color: color == null && nullToAbsent
+          ? const Value.absent()
+          : Value(color),
+      createdAt: Value(createdAt),
+      updatedAt: updatedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(updatedAt),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
+    );
+  }
+
+  factory Annotation.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return Annotation(
+      id: serializer.fromJson<int>(json['id']),
+      uuid: serializer.fromJson<String>(json['uuid']),
+      documentId: serializer.fromJson<int>(json['documentId']),
+      kind: $AnnotationsTable.$converterkind.fromJson(
+        serializer.fromJson<String>(json['kind']),
+      ),
+      anchor: serializer.fromJson<String>(json['anchor']),
+      excerpt: serializer.fromJson<String?>(json['excerpt']),
+      note: serializer.fromJson<String?>(json['note']),
+      color: serializer.fromJson<String?>(json['color']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      updatedAt: serializer.fromJson<DateTime?>(json['updatedAt']),
+      deletedAt: serializer.fromJson<DateTime?>(json['deletedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'uuid': serializer.toJson<String>(uuid),
+      'documentId': serializer.toJson<int>(documentId),
+      'kind': serializer.toJson<String>(
+        $AnnotationsTable.$converterkind.toJson(kind),
+      ),
+      'anchor': serializer.toJson<String>(anchor),
+      'excerpt': serializer.toJson<String?>(excerpt),
+      'note': serializer.toJson<String?>(note),
+      'color': serializer.toJson<String?>(color),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'updatedAt': serializer.toJson<DateTime?>(updatedAt),
+      'deletedAt': serializer.toJson<DateTime?>(deletedAt),
+    };
+  }
+
+  Annotation copyWith({
+    int? id,
+    String? uuid,
+    int? documentId,
+    AnnotationKind? kind,
+    String? anchor,
+    Value<String?> excerpt = const Value.absent(),
+    Value<String?> note = const Value.absent(),
+    Value<String?> color = const Value.absent(),
+    DateTime? createdAt,
+    Value<DateTime?> updatedAt = const Value.absent(),
+    Value<DateTime?> deletedAt = const Value.absent(),
+  }) => Annotation(
+    id: id ?? this.id,
+    uuid: uuid ?? this.uuid,
+    documentId: documentId ?? this.documentId,
+    kind: kind ?? this.kind,
+    anchor: anchor ?? this.anchor,
+    excerpt: excerpt.present ? excerpt.value : this.excerpt,
+    note: note.present ? note.value : this.note,
+    color: color.present ? color.value : this.color,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt.present ? updatedAt.value : this.updatedAt,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
+  );
+  Annotation copyWithCompanion(AnnotationsCompanion data) {
+    return Annotation(
+      id: data.id.present ? data.id.value : this.id,
+      uuid: data.uuid.present ? data.uuid.value : this.uuid,
+      documentId: data.documentId.present
+          ? data.documentId.value
+          : this.documentId,
+      kind: data.kind.present ? data.kind.value : this.kind,
+      anchor: data.anchor.present ? data.anchor.value : this.anchor,
+      excerpt: data.excerpt.present ? data.excerpt.value : this.excerpt,
+      note: data.note.present ? data.note.value : this.note,
+      color: data.color.present ? data.color.value : this.color,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('Annotation(')
+          ..write('id: $id, ')
+          ..write('uuid: $uuid, ')
+          ..write('documentId: $documentId, ')
+          ..write('kind: $kind, ')
+          ..write('anchor: $anchor, ')
+          ..write('excerpt: $excerpt, ')
+          ..write('note: $note, ')
+          ..write('color: $color, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    uuid,
+    documentId,
+    kind,
+    anchor,
+    excerpt,
+    note,
+    color,
+    createdAt,
+    updatedAt,
+    deletedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is Annotation &&
+          other.id == this.id &&
+          other.uuid == this.uuid &&
+          other.documentId == this.documentId &&
+          other.kind == this.kind &&
+          other.anchor == this.anchor &&
+          other.excerpt == this.excerpt &&
+          other.note == this.note &&
+          other.color == this.color &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt &&
+          other.deletedAt == this.deletedAt);
+}
+
+class AnnotationsCompanion extends UpdateCompanion<Annotation> {
+  final Value<int> id;
+  final Value<String> uuid;
+  final Value<int> documentId;
+  final Value<AnnotationKind> kind;
+  final Value<String> anchor;
+  final Value<String?> excerpt;
+  final Value<String?> note;
+  final Value<String?> color;
+  final Value<DateTime> createdAt;
+  final Value<DateTime?> updatedAt;
+  final Value<DateTime?> deletedAt;
+  const AnnotationsCompanion({
+    this.id = const Value.absent(),
+    this.uuid = const Value.absent(),
+    this.documentId = const Value.absent(),
+    this.kind = const Value.absent(),
+    this.anchor = const Value.absent(),
+    this.excerpt = const Value.absent(),
+    this.note = const Value.absent(),
+    this.color = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+  });
+  AnnotationsCompanion.insert({
+    this.id = const Value.absent(),
+    required String uuid,
+    required int documentId,
+    required AnnotationKind kind,
+    required String anchor,
+    this.excerpt = const Value.absent(),
+    this.note = const Value.absent(),
+    this.color = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.deletedAt = const Value.absent(),
+  }) : uuid = Value(uuid),
+       documentId = Value(documentId),
+       kind = Value(kind),
+       anchor = Value(anchor);
+  static Insertable<Annotation> custom({
+    Expression<int>? id,
+    Expression<String>? uuid,
+    Expression<int>? documentId,
+    Expression<String>? kind,
+    Expression<String>? anchor,
+    Expression<String>? excerpt,
+    Expression<String>? note,
+    Expression<String>? color,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? updatedAt,
+    Expression<DateTime>? deletedAt,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (uuid != null) 'uuid': uuid,
+      if (documentId != null) 'document_id': documentId,
+      if (kind != null) 'kind': kind,
+      if (anchor != null) 'anchor': anchor,
+      if (excerpt != null) 'excerpt': excerpt,
+      if (note != null) 'note': note,
+      if (color != null) 'color': color,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (deletedAt != null) 'deleted_at': deletedAt,
+    });
+  }
+
+  AnnotationsCompanion copyWith({
+    Value<int>? id,
+    Value<String>? uuid,
+    Value<int>? documentId,
+    Value<AnnotationKind>? kind,
+    Value<String>? anchor,
+    Value<String?>? excerpt,
+    Value<String?>? note,
+    Value<String?>? color,
+    Value<DateTime>? createdAt,
+    Value<DateTime?>? updatedAt,
+    Value<DateTime?>? deletedAt,
+  }) {
+    return AnnotationsCompanion(
+      id: id ?? this.id,
+      uuid: uuid ?? this.uuid,
+      documentId: documentId ?? this.documentId,
+      kind: kind ?? this.kind,
+      anchor: anchor ?? this.anchor,
+      excerpt: excerpt ?? this.excerpt,
+      note: note ?? this.note,
+      color: color ?? this.color,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      deletedAt: deletedAt ?? this.deletedAt,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (uuid.present) {
+      map['uuid'] = Variable<String>(uuid.value);
+    }
+    if (documentId.present) {
+      map['document_id'] = Variable<int>(documentId.value);
+    }
+    if (kind.present) {
+      map['kind'] = Variable<String>(
+        $AnnotationsTable.$converterkind.toSql(kind.value),
+      );
+    }
+    if (anchor.present) {
+      map['anchor'] = Variable<String>(anchor.value);
+    }
+    if (excerpt.present) {
+      map['excerpt'] = Variable<String>(excerpt.value);
+    }
+    if (note.present) {
+      map['note'] = Variable<String>(note.value);
+    }
+    if (color.present) {
+      map['color'] = Variable<String>(color.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<DateTime>(deletedAt.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('AnnotationsCompanion(')
+          ..write('id: $id, ')
+          ..write('uuid: $uuid, ')
+          ..write('documentId: $documentId, ')
+          ..write('kind: $kind, ')
+          ..write('anchor: $anchor, ')
+          ..write('excerpt: $excerpt, ')
+          ..write('note: $note, ')
+          ..write('color: $color, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('deletedAt: $deletedAt')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -2419,6 +3080,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $ReadingPositionsTable readingPositions = $ReadingPositionsTable(
     this,
   );
+  late final $AnnotationsTable annotations = $AnnotationsTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -2430,6 +3092,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     tags,
     documentTags,
     readingPositions,
+    annotations,
   ];
 }
 
@@ -2544,6 +3207,24 @@ final class $$DocumentsTableReferences
     final cache = $_typedResult.readTableOrNull(
       _readingPositionsRefsTable($_db),
     );
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
+
+  static MultiTypedResultKey<$AnnotationsTable, List<Annotation>>
+  _annotationsRefsTable(_$AppDatabase db) => MultiTypedResultKey.fromTable(
+    db.annotations,
+    aliasName: $_aliasNameGenerator(db.documents.id, db.annotations.documentId),
+  );
+
+  $$AnnotationsTableProcessedTableManager get annotationsRefs {
+    final manager = $$AnnotationsTableTableManager(
+      $_db,
+      $_db.annotations,
+    ).filter((f) => f.documentId.id.sqlEquals($_itemColumn<int>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(_annotationsRefsTable($_db));
     return ProcessedTableManager(
       manager.$state.copyWith(prefetchedData: cache),
     );
@@ -2711,6 +3392,31 @@ class $$DocumentsTableFilterComposer
           }) => $$ReadingPositionsTableFilterComposer(
             $db: $db,
             $table: $db.readingPositions,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+
+  Expression<bool> annotationsRefs(
+    Expression<bool> Function($$AnnotationsTableFilterComposer f) f,
+  ) {
+    final $$AnnotationsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.annotations,
+      getReferencedColumn: (t) => t.documentId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$AnnotationsTableFilterComposer(
+            $db: $db,
+            $table: $db.annotations,
             $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
             joinBuilder: joinBuilder,
             $removeJoinBuilderFromRootComposer:
@@ -2961,6 +3667,31 @@ class $$DocumentsTableAnnotationComposer
     );
     return f(composer);
   }
+
+  Expression<T> annotationsRefs<T extends Object>(
+    Expression<T> Function($$AnnotationsTableAnnotationComposer a) f,
+  ) {
+    final $$AnnotationsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.annotations,
+      getReferencedColumn: (t) => t.documentId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$AnnotationsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.annotations,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
 }
 
 class $$DocumentsTableTableManager
@@ -2980,6 +3711,7 @@ class $$DocumentsTableTableManager
             bool documentCollectionsRefs,
             bool documentTagsRefs,
             bool readingPositionsRefs,
+            bool annotationsRefs,
           })
         > {
   $$DocumentsTableTableManager(_$AppDatabase db, $DocumentsTable table)
@@ -3082,6 +3814,7 @@ class $$DocumentsTableTableManager
                 documentCollectionsRefs = false,
                 documentTagsRefs = false,
                 readingPositionsRefs = false,
+                annotationsRefs = false,
               }) {
                 return PrefetchHooks(
                   db: db,
@@ -3089,6 +3822,7 @@ class $$DocumentsTableTableManager
                     if (documentCollectionsRefs) db.documentCollections,
                     if (documentTagsRefs) db.documentTags,
                     if (readingPositionsRefs) db.readingPositions,
+                    if (annotationsRefs) db.annotations,
                   ],
                   addJoins: null,
                   getPrefetchedDataCallback: (items) async {
@@ -3156,6 +3890,27 @@ class $$DocumentsTableTableManager
                               ),
                           typedResults: items,
                         ),
+                      if (annotationsRefs)
+                        await $_getPrefetchedData<
+                          Document,
+                          $DocumentsTable,
+                          Annotation
+                        >(
+                          currentTable: table,
+                          referencedTable: $$DocumentsTableReferences
+                              ._annotationsRefsTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$DocumentsTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).annotationsRefs,
+                          referencedItemsForCurrentItem:
+                              (item, referencedItems) => referencedItems.where(
+                                (e) => e.documentId == item.id,
+                              ),
+                          typedResults: items,
+                        ),
                     ];
                   },
                 );
@@ -3180,6 +3935,7 @@ typedef $$DocumentsTableProcessedTableManager =
         bool documentCollectionsRefs,
         bool documentTagsRefs,
         bool readingPositionsRefs,
+        bool annotationsRefs,
       })
     >;
 typedef $$CollectionsTableCreateCompanionBuilder =
@@ -4790,6 +5546,434 @@ typedef $$ReadingPositionsTableProcessedTableManager =
       ReadingPosition,
       PrefetchHooks Function({bool documentId})
     >;
+typedef $$AnnotationsTableCreateCompanionBuilder =
+    AnnotationsCompanion Function({
+      Value<int> id,
+      required String uuid,
+      required int documentId,
+      required AnnotationKind kind,
+      required String anchor,
+      Value<String?> excerpt,
+      Value<String?> note,
+      Value<String?> color,
+      Value<DateTime> createdAt,
+      Value<DateTime?> updatedAt,
+      Value<DateTime?> deletedAt,
+    });
+typedef $$AnnotationsTableUpdateCompanionBuilder =
+    AnnotationsCompanion Function({
+      Value<int> id,
+      Value<String> uuid,
+      Value<int> documentId,
+      Value<AnnotationKind> kind,
+      Value<String> anchor,
+      Value<String?> excerpt,
+      Value<String?> note,
+      Value<String?> color,
+      Value<DateTime> createdAt,
+      Value<DateTime?> updatedAt,
+      Value<DateTime?> deletedAt,
+    });
+
+final class $$AnnotationsTableReferences
+    extends BaseReferences<_$AppDatabase, $AnnotationsTable, Annotation> {
+  $$AnnotationsTableReferences(super.$_db, super.$_table, super.$_typedResult);
+
+  static $DocumentsTable _documentIdTable(_$AppDatabase db) =>
+      db.documents.createAlias(
+        $_aliasNameGenerator(db.annotations.documentId, db.documents.id),
+      );
+
+  $$DocumentsTableProcessedTableManager get documentId {
+    final $_column = $_itemColumn<int>('document_id')!;
+
+    final manager = $$DocumentsTableTableManager(
+      $_db,
+      $_db.documents,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_documentIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+}
+
+class $$AnnotationsTableFilterComposer
+    extends Composer<_$AppDatabase, $AnnotationsTable> {
+  $$AnnotationsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get uuid => $composableBuilder(
+    column: $table.uuid,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnWithTypeConverterFilters<AnnotationKind, AnnotationKind, String>
+  get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnWithTypeConverterFilters(column),
+  );
+
+  ColumnFilters<String> get anchor => $composableBuilder(
+    column: $table.anchor,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get excerpt => $composableBuilder(
+    column: $table.excerpt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get note => $composableBuilder(
+    column: $table.note,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get color => $composableBuilder(
+    column: $table.color,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  $$DocumentsTableFilterComposer get documentId {
+    final $$DocumentsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.documentId,
+      referencedTable: $db.documents,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$DocumentsTableFilterComposer(
+            $db: $db,
+            $table: $db.documents,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$AnnotationsTableOrderingComposer
+    extends Composer<_$AppDatabase, $AnnotationsTable> {
+  $$AnnotationsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get uuid => $composableBuilder(
+    column: $table.uuid,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get anchor => $composableBuilder(
+    column: $table.anchor,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get excerpt => $composableBuilder(
+    column: $table.excerpt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get note => $composableBuilder(
+    column: $table.note,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get color => $composableBuilder(
+    column: $table.color,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  $$DocumentsTableOrderingComposer get documentId {
+    final $$DocumentsTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.documentId,
+      referencedTable: $db.documents,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$DocumentsTableOrderingComposer(
+            $db: $db,
+            $table: $db.documents,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$AnnotationsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $AnnotationsTable> {
+  $$AnnotationsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get uuid =>
+      $composableBuilder(column: $table.uuid, builder: (column) => column);
+
+  GeneratedColumnWithTypeConverter<AnnotationKind, String> get kind =>
+      $composableBuilder(column: $table.kind, builder: (column) => column);
+
+  GeneratedColumn<String> get anchor =>
+      $composableBuilder(column: $table.anchor, builder: (column) => column);
+
+  GeneratedColumn<String> get excerpt =>
+      $composableBuilder(column: $table.excerpt, builder: (column) => column);
+
+  GeneratedColumn<String> get note =>
+      $composableBuilder(column: $table.note, builder: (column) => column);
+
+  GeneratedColumn<String> get color =>
+      $composableBuilder(column: $table.color, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+
+  $$DocumentsTableAnnotationComposer get documentId {
+    final $$DocumentsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.documentId,
+      referencedTable: $db.documents,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$DocumentsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.documents,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$AnnotationsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $AnnotationsTable,
+          Annotation,
+          $$AnnotationsTableFilterComposer,
+          $$AnnotationsTableOrderingComposer,
+          $$AnnotationsTableAnnotationComposer,
+          $$AnnotationsTableCreateCompanionBuilder,
+          $$AnnotationsTableUpdateCompanionBuilder,
+          (Annotation, $$AnnotationsTableReferences),
+          Annotation,
+          PrefetchHooks Function({bool documentId})
+        > {
+  $$AnnotationsTableTableManager(_$AppDatabase db, $AnnotationsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$AnnotationsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$AnnotationsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$AnnotationsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                Value<String> uuid = const Value.absent(),
+                Value<int> documentId = const Value.absent(),
+                Value<AnnotationKind> kind = const Value.absent(),
+                Value<String> anchor = const Value.absent(),
+                Value<String?> excerpt = const Value.absent(),
+                Value<String?> note = const Value.absent(),
+                Value<String?> color = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime?> updatedAt = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+              }) => AnnotationsCompanion(
+                id: id,
+                uuid: uuid,
+                documentId: documentId,
+                kind: kind,
+                anchor: anchor,
+                excerpt: excerpt,
+                note: note,
+                color: color,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                deletedAt: deletedAt,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                required String uuid,
+                required int documentId,
+                required AnnotationKind kind,
+                required String anchor,
+                Value<String?> excerpt = const Value.absent(),
+                Value<String?> note = const Value.absent(),
+                Value<String?> color = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime?> updatedAt = const Value.absent(),
+                Value<DateTime?> deletedAt = const Value.absent(),
+              }) => AnnotationsCompanion.insert(
+                id: id,
+                uuid: uuid,
+                documentId: documentId,
+                kind: kind,
+                anchor: anchor,
+                excerpt: excerpt,
+                note: note,
+                color: color,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                deletedAt: deletedAt,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable(table),
+                  $$AnnotationsTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: ({documentId = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [],
+              addJoins:
+                  <
+                    T extends TableManagerState<
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic
+                    >
+                  >(state) {
+                    if (documentId) {
+                      state =
+                          state.withJoin(
+                                currentTable: table,
+                                currentColumn: table.documentId,
+                                referencedTable: $$AnnotationsTableReferences
+                                    ._documentIdTable(db),
+                                referencedColumn: $$AnnotationsTableReferences
+                                    ._documentIdTable(db)
+                                    .id,
+                              )
+                              as T;
+                    }
+
+                    return state;
+                  },
+              getPrefetchedDataCallback: (items) async {
+                return [];
+              },
+            );
+          },
+        ),
+      );
+}
+
+typedef $$AnnotationsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $AnnotationsTable,
+      Annotation,
+      $$AnnotationsTableFilterComposer,
+      $$AnnotationsTableOrderingComposer,
+      $$AnnotationsTableAnnotationComposer,
+      $$AnnotationsTableCreateCompanionBuilder,
+      $$AnnotationsTableUpdateCompanionBuilder,
+      (Annotation, $$AnnotationsTableReferences),
+      Annotation,
+      PrefetchHooks Function({bool documentId})
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -4805,4 +5989,6 @@ class $AppDatabaseManager {
       $$DocumentTagsTableTableManager(_db, _db.documentTags);
   $$ReadingPositionsTableTableManager get readingPositions =>
       $$ReadingPositionsTableTableManager(_db, _db.readingPositions);
+  $$AnnotationsTableTableManager get annotations =>
+      $$AnnotationsTableTableManager(_db, _db.annotations);
 }

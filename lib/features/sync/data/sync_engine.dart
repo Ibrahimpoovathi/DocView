@@ -6,6 +6,8 @@ import 'package:path/path.dart' as p;
 import '../../../core/format/doc_format.dart';
 import '../../../core/paths/app_paths.dart';
 import '../../../core/storage/database.dart';
+import '../../reader/data/annotations_repository.dart';
+import '../../reader/domain/annotations.dart';
 import '../../../features/reader/domain/viewer_prefs.dart';
 import 'sync_manifest.dart';
 import 'webdav_sync.dart';
@@ -19,6 +21,7 @@ class SyncResult {
   final int appliedTombstones;
   final int appliedUndeletes;
   final int mergedPositions;
+  final int mergedAnnotations;
 
   const SyncResult({
     required this.uploadedBooks,
@@ -28,6 +31,7 @@ class SyncResult {
     required this.appliedTombstones,
     required this.appliedUndeletes,
     required this.mergedPositions,
+    this.mergedAnnotations = 0,
   });
 
   String get summary {
@@ -36,6 +40,7 @@ class SyncResult {
       if (newRemoteDocs > 0) 'Pulled $newRemoteDocs doc(s)',
       if (mergedMetadata > 0) 'Updated $mergedMetadata metadata row(s)',
       if (mergedPositions > 0) 'Merged $mergedPositions position(s)',
+      if (mergedAnnotations > 0) 'Merged $mergedAnnotations annotation(s)',
       if (appliedTombstones > 0) 'Removed $appliedTombstones',
       if (appliedUndeletes > 0) 'Restored $appliedUndeletes',
       if (uploadedCovers > 0) 'Covers: $uploadedCovers up',
@@ -55,6 +60,7 @@ class SyncEngine {
 
   final AppDatabase _db;
   final WebdavBackend _dav;
+  AnnotationsRepository get _annRepo => AnnotationsRepository(_db);
 
   /// Coarse progress for UI ("Pulling manifest…", "Uploading 2/5 …").
   final void Function(String step)? onStep;
@@ -79,6 +85,7 @@ class SyncEngine {
       appliedTombstones: pulled.tombstones,
       appliedUndeletes: pulled.undeletes,
       mergedPositions: pulled.positions,
+      mergedAnnotations: pulled.annotations,
     );
   }
 
@@ -91,11 +98,15 @@ class SyncEngine {
 
   // --- Pull -----------------------------------------------------------------
 
-  Future<({int newDocs, int metadata, int tombstones, int undeletes, int positions})>
+  Future<({int newDocs, int metadata, int tombstones, int undeletes, int positions, int annotations})>
       _pull(SyncManifest? remote, Map<String, int> remoteBooks,
           Set<String> remoteCovers) async {
-    var newDocs = 0, metadata = 0, tombstones = 0, undeletes = 0, positions = 0;
-    if (remote == null) return (newDocs: 0, metadata: 0, tombstones: 0, undeletes: 0, positions: 0);
+    var newDocs = 0, metadata = 0, tombstones = 0, undeletes = 0, positions = 0, annotations = 0;
+    if (remote == null) {
+      return (
+        newDocs: 0, metadata: 0, tombstones: 0, undeletes: 0, positions: 0, annotations: 0
+      );
+    }
 
     final localBySha = await _docsBySha();
     final shaToId = <String, int>{
@@ -227,6 +238,30 @@ class SyncEngine {
       await _mergeNames(remote.collections, _db.collections);
       await _mergeTags(remote.tags);
       await _mergeJoins(remote);
+
+      // 4. Annotations by uuid (LWW + deletion-dominant ties in the repo).
+      for (final ra in remote.annotations) {
+        final docId = shaToId[ra.sha256];
+        if (docId == null) continue; // doc unknown on both sides
+        AnnotationKind? kind;
+        for (final k in AnnotationKind.values) {
+          if (k.name == ra.kind) kind = k;
+        }
+        if (kind == null) continue;
+        await _annRepo.upsertRemote(AnnotationsCompanion.insert(
+          uuid: ra.uuid,
+          documentId: docId,
+          kind: kind,
+          anchor: ra.anchor,
+          excerpt: Value(ra.excerpt),
+          note: Value(ra.note),
+          color: Value(ra.color),
+          createdAt: Value(ra.createdAt ?? DateTime.now()),
+          updatedAt: Value(ra.updatedAt),
+          deletedAt: Value(ra.deletedAt),
+        ));
+        annotations++;
+      }
     });
 
     return (
@@ -235,6 +270,7 @@ class SyncEngine {
       tombstones: tombstones,
       undeletes: undeletes,
       positions: positions,
+      annotations: annotations,
     );
   }
 
@@ -455,9 +491,21 @@ class SyncEngine {
       }
     }
 
+    // Annotations (incl. tombstones — deletions must propagate).
+    final annRows = <SyncAnnotation>[];
+    for (final row in await (_db.select(_db.annotations).join([
+          innerJoin(
+              _db.documents, _db.documents.id.equalsExp(_db.annotations.documentId)),
+        ])).get()) {
+      final doc = row.readTable(_db.documents);
+      final ann = row.readTable(_db.annotations);
+      annRows.add(SyncAnnotation.fromRow(doc.sha256, ann));
+    }
+
     return SyncManifest(
       documents: docRows,
       positions: posRows,
+      annotations: annRows,
       collections: collections.map((c) => c.name).toList(),
       tags: tags.map((t) => t.name).toList(),
       documentCollections: colLinks,

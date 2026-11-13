@@ -16,8 +16,13 @@ import '../../../core/format/doc_format.dart';
 import '../../../core/storage/database.dart';
 import '../data/book_server.dart';
 import '../data/foliate_assets.dart';
+import '../domain/annotations.dart';
 import '../../library/presentation/providers.dart';
 import '../../dictionary/presentation/dictionary_sheet.dart';
+import '../../sync/presentation/sync_providers.dart';
+import 'annotation_palette.dart';
+import 'annotation_sheets.dart';
+import 'annotations_list.dart';
 import 'reader_chrome.dart';
 import '../domain/viewer_prefs.dart';
 
@@ -73,6 +78,11 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
   int _hitIdx = 0;
   bool _searchFailed = false;
 
+  // Annotations: DB rows for this document (lookup by uuid on tap) plus the
+  // selection awaiting a highlight/note action.
+  List<Annotation> _annotations = const [];
+  ({String text, String cfi})? _selAction;
+
   Document? get _doc => widget.doc;
   bool get _canSave => widget.doc != null;
 
@@ -113,6 +123,8 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
     if (widget.doc != null) {
       final pos =
           await ref.read(readingRepositoryProvider).ensure(widget.doc!.id);
+      _annotations =
+          await ref.read(annotationsRepositoryProvider).listForDoc(widget.doc!.id);
       _ensureBookUrl();
       if (!mounted) return;
       setState(() {
@@ -252,6 +264,206 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
   }
 
   static String _jsonStr(String s) => "'${s.replaceAll("'", r"\'")}'";
+
+  // --- annotations -------------------------------------------------------------
+
+  /// Battery-only: simulate a multi-word selection (JS), create a
+  /// highlight + note + bookmark, optionally sync, then open the
+  /// annotations list for the screenshot.
+  Future<void> _batteryNoteFlow() async {
+    await Future<void>.delayed(const Duration(milliseconds: 1500));
+    await _web?.evaluateJavascript(source: 'window.docviewBatterySelect()');
+    await Future<void>.delayed(const Duration(milliseconds: 1200));
+    if (!mounted) return;
+    if (_selAction != null) {
+      await _createReflowHighlight('yellow');
+    }
+    final doc = _doc;
+    final cfi = _location;
+    if (doc != null && cfi != null) {
+      await ref.read(annotationsRepositoryProvider).create(
+            doc.id,
+            kind: AnnotationKind.note,
+            anchor: AnnotationAnchor(cfi: cfi),
+            excerpt: 'Battery note excerpt',
+            note: 'Battery note body',
+          );
+      await _toggleReflowBookmark();
+    }
+    if (batterySyncUrl.isNotEmpty) {
+      // Wait for a sync run that actually executes (the boot auto-sync may
+      // still hold the runner; a completed run is a full pull+push, so the
+      // annotations list below reflects the merged state).
+      for (var i = 0; i < 5; i++) {
+        final message = await ref.read(syncRunnerProvider.notifier).run();
+        if (message != null) break;
+        await Future<void>.delayed(const Duration(seconds: 3));
+      }
+    }
+    if (!mounted || doc == null) return;
+    await showAnnotationsList(context, ref, doc, onJump: (_) {});
+  }
+
+  /// Pushes DB highlights into the foliate overlay layer (once per open).
+  Future<void> _seedAnnotations() async {
+    if (!_canSave) return;
+    final web = _web;
+    if (web == null) return;
+    final rows = <Map<String, Object?>>[
+      for (final a in _annotations)
+        if (a.kind == AnnotationKind.highlight)
+          if (AnnotationAnchor.fromJson(
+                  jsonDecode(a.anchor) as Map<String, Object?>)
+              .cfi case final String cfi)
+            {'value': cfi, 'color': a.color ?? 'yellow', 'uuid': a.uuid},
+    ];
+    if (rows.isEmpty) return;
+    await web.evaluateJavascript(
+        source: 'window.docviewSetAnnotations(${jsonEncode(rows)})');
+  }
+
+  Future<void> _pushAddAnnotation({
+    required String cfi,
+    required String uuid,
+    required String color,
+  }) =>
+      _web?.evaluateJavascript(source:
+          'window.docviewAddAnnotation(${jsonEncode({
+            'value': cfi,
+            'color': color,
+            'uuid': uuid,
+          })})') ??
+      Future.value();
+
+  Future<void> _pushUpdateAnnotation({
+    required String cfi,
+    required String uuid,
+    required String color,
+  }) =>
+      _web?.evaluateJavascript(source:
+          'window.docviewUpdateAnnotation(${jsonEncode({
+            'value': cfi,
+            'color': color,
+            'uuid': uuid,
+          })})') ??
+      Future.value();
+
+  Future<void> _pushRemoveAnnotation(String cfi) =>
+      _web?.evaluateJavascript(
+          source: 'window.docviewRemoveAnnotation(${_jsonStr(cfi)})') ??
+      Future.value();
+
+  void _dismissSelAction() {
+    if (!mounted) return;
+    setState(() => _selAction = null);
+    _web?.evaluateJavascript(source: 'window.docviewClearSelection()');
+  }
+
+  Future<void> _createReflowHighlight(String colorKey) async {
+    final sel = _selAction;
+    final doc = _doc;
+    if (sel == null || doc == null) return;
+    final ann = await ref.read(annotationsRepositoryProvider).create(
+          doc.id,
+          kind: AnnotationKind.highlight,
+          anchor: AnnotationAnchor(cfi: sel.cfi),
+          excerpt: sel.text,
+          color: colorKey,
+        );
+    if (!mounted) return;
+    setState(() => _annotations = [..._annotations, ann]);
+    await _pushAddAnnotation(
+        cfi: sel.cfi, uuid: ann.uuid, color: colorKey);
+    _dismissSelAction();
+  }
+
+  Future<void> _createReflowNote() async {
+    final sel = _selAction;
+    final doc = _doc;
+    if (sel == null || doc == null) return;
+    final note = await promptNoteText(context);
+    if (note == null || note.isEmpty) {
+      _dismissSelAction();
+      return;
+    }
+    final ann = await ref.read(annotationsRepositoryProvider).create(
+          doc.id,
+          kind: AnnotationKind.note,
+          anchor: AnnotationAnchor(cfi: sel.cfi),
+          excerpt: sel.text,
+          note: note,
+        );
+    if (!mounted) return;
+    setState(() => _annotations = [..._annotations, ann]);
+    _dismissSelAction();
+  }
+
+  bool _hasReflowBookmarkAt(String cfi) => _annotations.any(
+        (a) =>
+            a.kind == AnnotationKind.bookmark &&
+            AnnotationAnchor.fromJson(
+                    jsonDecode(a.anchor) as Map<String, Object?>)
+                .cfi ==
+                cfi,
+      );
+
+  Future<void> _toggleReflowBookmark() async {
+    final doc = _doc;
+    final cfi = _location;
+    if (doc == null || cfi == null) return;
+    final existing = _annotations
+        .where((a) => a.kind == AnnotationKind.bookmark)
+        .where((a) =>
+            AnnotationAnchor.fromJson(
+                    jsonDecode(a.anchor) as Map<String, Object?>)
+                .cfi ==
+            cfi)
+        .firstOrNull;
+    if (existing != null) {
+      await ref.read(annotationsRepositoryProvider).softDelete(existing.id);
+      if (!mounted) return;
+      setState(() {
+        _annotations = _annotations.where((a) => a.id != existing.id).toList();
+      });
+      return;
+    }
+    final ann = await ref.read(annotationsRepositoryProvider).create(
+          doc.id,
+          kind: AnnotationKind.bookmark,
+          anchor: AnnotationAnchor(cfi: cfi),
+          excerpt: 'Location ${(_fraction * 100).round()}%',
+        );
+    if (!mounted) return;
+    setState(() {
+      _annotations = [..._annotations, ann];
+    });
+  }
+
+  Future<void> _openAnnotationEditor(String uuid) async {    Annotation? find() =>
+        _annotations.where((a) => a.uuid == uuid).firstOrNull;
+    final ann = find();
+    if (ann == null || !mounted) return;
+    final anchor =
+        AnnotationAnchor.fromJson(jsonDecode(ann.anchor) as Map<String, Object?>);
+    final cfi = anchor.cfi;
+    await showAnnotationEditor(
+      context,
+      ref,
+      ann,
+      onChanged: (color) {
+        if (color == null || cfi == null) return;
+        _pushUpdateAnnotation(cfi: cfi, uuid: uuid, color: color);
+      },
+      onDeleted: () {
+        if (cfi != null) _pushRemoveAnnotation(cfi);
+        if (mounted) {
+          setState(() => _annotations = [
+                ..._annotations.where((a) => a.uuid != uuid),
+              ]);
+        }
+      },
+    );
+  }
 
   // --- dictionary lookup -----------------------------------------------------
 
@@ -393,6 +605,58 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
         ),
         backgroundColor: cs.surface,
         surfaceTintColor: Colors.transparent,
+        actions: [
+          if (_canSave)
+            IconButton(
+              icon: const Icon(Icons.format_list_bulleted_rounded),
+              tooltip: 'Annotations',
+              onPressed: _doc == null
+                  ? null
+                  : () => showAnnotationsList(
+                        context,
+                        ref,
+                        _doc!,
+                        onJump: (ann) {
+                          final cfi = AnnotationAnchor.fromJson(jsonDecode(
+                                  ann.anchor) as Map<String, Object?>)
+                              .cfi;
+                          if (cfi != null) {
+                            _web?.evaluateJavascript(
+                                source:
+                                    'window.docviewShowAnnotation(${_jsonStr(cfi)})');
+                          }
+                        },
+                        onUpdateColor: (ann, color) {
+                          final cfi = AnnotationAnchor.fromJson(jsonDecode(
+                                  ann.anchor) as Map<String, Object?>)
+                              .cfi;
+                          if (cfi != null && color != null) {
+                            _pushUpdateAnnotation(
+                                cfi: cfi, uuid: ann.uuid, color: color);
+                          }
+                        },
+                        onDelete: (ann) {
+                          final cfi = AnnotationAnchor.fromJson(jsonDecode(
+                                  ann.anchor) as Map<String, Object?>)
+                              .cfi;
+                          if (cfi != null) _pushRemoveAnnotation(cfi);
+                        },
+                      ),
+            ),
+          if (_canSave && _location != null)
+            IconButton(
+              icon: Icon(
+                _hasReflowBookmarkAt(_location!)
+                    ? Icons.bookmark_rounded
+                    : Icons.bookmark_border_rounded,
+                color: _hasReflowBookmarkAt(_location!) ? cs.primary : null,
+              ),
+              tooltip: _hasReflowBookmarkAt(_location!)
+                  ? 'Remove bookmark'
+                  : 'Bookmark this location',
+              onPressed: _toggleReflowBookmark,
+            ),
+        ],
       ),
       body: Column(
         children: [
@@ -467,6 +731,10 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
                           callback: (_) {
                             if (!mounted) return;
                             setState(() => _booting = false);
+                            _seedAnnotations();
+                            if (batteryHook && batteryNoteFlow == 'epub') {
+                              _batteryNoteFlow();
+                            }
                             if (batteryHook && batterySearchTerm.isNotEmpty) {
                               _openSearch();
                               _searchCtrl.text = batterySearchTerm;
@@ -489,16 +757,38 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
                                 ? args.first as Map
                                 : const <String, dynamic>{};
                             final text = payload['text'] as String? ?? '';
+                            final cfi = payload['cfi'] as String?;
                             if (text.isEmpty) return;
                             // Single-word selections open the dictionary;
-                            // longer selections are probably copy-flows.
+                            // longer selections become highlight/note flows
+                            // (when the engine can anchor them).
                             final word = sanitizeLookupWord(text);
                             if (word == null || word.isEmpty) return;
-                            _dictDebounce?.cancel();
-                            _dictDebounce = Timer(
-                              const Duration(milliseconds: 300),
-                              () => _openDictionary(word),
-                            );
+                            final wordCount =
+                                text.trim().split(RegExp(r'\s+')).length;
+                            if (wordCount <= 1) {
+                              _dictDebounce?.cancel();
+                              _dictDebounce = Timer(
+                                const Duration(milliseconds: 300),
+                                () => _openDictionary(word),
+                              );
+                            } else if (cfi != null &&
+                                cfi.isNotEmpty &&
+                                widget.doc != null) {
+                              setState(() => _selAction = (text: text, cfi: cfi));
+                            }
+                          },
+                        );
+                        c.addJavaScriptHandler(
+                          handlerName: 'onReflowAnnotationTap',
+                          callback: (args) {
+                            if (!mounted) return;
+                            final payload = args.isNotEmpty
+                                ? args.first as Map
+                                : const <String, dynamic>{};
+                            final uuid = payload['uuid'] as String?;
+                            if (uuid == null || uuid.isEmpty) return;
+                            _openAnnotationEditor(uuid);
                           },
                         );
                         c.addJavaScriptHandler(
@@ -589,6 +879,18 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
                       child: _PulseLoader(cs: cs),
                     ),
                   ),
+                if (_selAction != null)
+                  Positioned(
+                    left: Dv.sp16,
+                    right: Dv.sp16,
+                    bottom: Dv.sp12,
+                    child: _SelectionActionBar(
+                      excerpt: _selAction!.text,
+                      onColor: _createReflowHighlight,
+                      onNote: _createReflowNote,
+                      onClose: _dismissSelAction,
+                    ),
+                  ),
               ],
             ),
           ),
@@ -632,6 +934,78 @@ class _PulseLoader extends StatelessWidget {
           ],
         ),
       );
+}
+
+/// Floating bar over the webview while a multi-word selection is active:
+/// tap a color to highlight, the note icon to create a note annotation.
+class _SelectionActionBar extends StatelessWidget {
+  const _SelectionActionBar({
+    required this.excerpt,
+    required this.onColor,
+    required this.onNote,
+    required this.onClose,
+  });
+
+  final String excerpt;
+  final ValueChanged<String> onColor;
+  final VoidCallback onNote;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Material(
+      color: cs.inverseSurface,
+      borderRadius: BorderRadius.circular(Dv.rLg),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(Dv.sp12, Dv.sp8, Dv.sp12, Dv.sp8),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                excerpt,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: cs.onInverseSurface),
+              ),
+            ),
+            const SizedBox(width: Dv.sp8),
+            for (final entry in annotationHex.entries)
+              Padding(
+                padding: const EdgeInsets.only(right: Dv.sp8),
+                child: InkWell(
+                  onTap: () => onColor(entry.key),
+                  customBorder: const CircleBorder(),
+                  child: Container(
+                    width: 26,
+                    height: 26,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Color(0xFF000000 |
+                          int.parse(entry.value.substring(1), radix: 16)),
+                    ),
+                  ),
+                ),
+              ),
+            IconButton(
+              icon: Icon(Icons.sticky_note_2_outlined,
+                  color: cs.onInverseSurface),
+              tooltip: 'Add note',
+              onPressed: onNote,
+            ),
+            IconButton(
+              icon: Icon(Icons.close_rounded, color: cs.onInverseSurface),
+              tooltip: 'Dismiss',
+              onPressed: onClose,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 /// One search hit from the foliate search bridge (excerpt already clipped).
