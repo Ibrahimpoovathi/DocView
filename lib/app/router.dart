@@ -40,6 +40,13 @@ const batteryNoteFlow = String.fromEnvironment('DOCVIEW_BATTERY_NOTE');
 /// 0 disables.
 const batteryBigLib = int.fromEnvironment('DOCVIEW_BATTERY_BIGLIB');
 
+/// Battery-only: HTTP base URL listing the edge battery files
+/// (`--dart-define=DOCVIEW_BATTERY_EDGE_URL=http://10.0.2.2:8080/dav/edge/`;
+/// the host must serve `_index.txt` with one file name per line plus the
+/// files themselves). Imports them at boot and auto-opens the next
+/// never-opened doc per boot. Overrides the standard seeds.
+const batteryEdgeUrl = String.fromEnvironment('DOCVIEW_BATTERY_EDGE_URL');
+
 final router = GoRouter(
   initialLocation: '/library',
   routes: [

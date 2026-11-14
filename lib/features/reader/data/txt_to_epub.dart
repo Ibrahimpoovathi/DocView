@@ -3,6 +3,53 @@ import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
 
+/// Minimal one-page EPUB shown when a text file exceeds the conversion size
+/// cap — renders as a normal reader page instead of an error banner.
+Uint8List txtTooLargeEpub(int sizeBytes) {
+  final mb = (sizeBytes / (1024 * 1024)).toStringAsFixed(0);
+  final page = '''<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><meta charset="utf-8"/><link rel="stylesheet" type="text/css" href="style.css"/></head>
+<body>
+<p>This text file is $mb MB. DocView opens text files up to
+$maxTxtConvertMb MB so the reader stays fast.</p>
+</body>
+</html>''';
+  final archive = Archive()
+    ..addFile(ArchiveFile.string('mimetype', 'application/epub+zip')
+      ..compression = CompressionType.none)
+    ..addFile(ArchiveFile.string(
+        'META-INF/container.xml', _containerXml))
+    ..addFile(ArchiveFile.string('OEBPS/content.opf', _opf))
+    ..addFile(ArchiveFile.string('OEBPS/ch1.xhtml', page));
+  return Uint8List.fromList(ZipEncoder().encode(archive));
+}
+
+/// Cap in MB for on-the-fly txt→EPUB conversion (shared with book_server).
+const maxTxtConvertMb = 15;
+
+const _containerXml = '''<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>''';
+
+const _opf = '''<?xml version="1.0" encoding="UTF-8"?>
+<package version="3.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="uid">urn:uuid:docview-txt-large</dc:identifier>
+    <dc:title>Text (too large)</dc:title>
+    <dc:language>und</dc:language>
+  </metadata>
+  <manifest>
+    <item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="ch1"/>
+  </spine>
+</package>''';
+
 /// Wraps plain text documents in a minimal EPUB 3 so foliate-js can render
 /// them with the same paginator as real EPUBs (chunked xhtml sections).
 Uint8List txtToEpub(Uint8List bytes) {
@@ -24,6 +71,9 @@ Uint8List txtToEpub(Uint8List bytes) {
       len += n;
     }
   }
+  // Empty / whitespace-only input: keep a single placeholder section so the
+  // nav/spine loops below always have at least one entry.
+  if (sections.last.isEmpty) sections.last.add('');
 
   String escape(String t) => t
       .replaceAll('&', '&amp;')
@@ -99,8 +149,7 @@ h1 { font-size: 1.1em; }
   add('OEBPS/content.opf', opf);
   add('OEBPS/nav.xhtml', nav);
   add('OEBPS/style.css', css);
-  for (var i = 0; i < sections.length; i++) {
-    final body = sections[i].map(escape).map((t) => '<p>$t</p>').join('\n');
+  for (var i = 0; i < sections.length; i++) {    final body = sections[i].map(escape).map((t) => '<p>$t</p>').join('\n');
     add(
       'OEBPS/ch${i + 1}.xhtml',
       '''<?xml version="1.0" encoding="UTF-8"?>
@@ -110,13 +159,6 @@ h1 { font-size: 1.1em; }
 $body
 </body>
 </html>''',
-    );
-  }
-
-  if (sections.isEmpty) {
-    add(
-      'OEBPS/ch1.xhtml',
-      '<html xmlns="http://www.w3.org/1999/xhtml"><body><p></p></body></html>',
     );
   }
 

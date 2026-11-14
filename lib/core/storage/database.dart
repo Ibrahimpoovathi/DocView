@@ -157,22 +157,36 @@ class AppDatabase extends _$AppDatabase {
           await customStatement(ftsBackfillSql);
         },
         onUpgrade: (m, from, to) async {
+          // addColumn re-run on a partially upgraded DB throws on a duplicate
+          // column; guard each ALTER with a PRAGMA check instead.
+          Future<void> addColumnIfMissing(
+              TableInfo table, GeneratedColumn column) async {
+            final names = await customSelect(
+                    'PRAGMA table_info(${table.actualTableName})')
+                .map((row) => row.read<String>('name'))
+                .get();
+            if (!names.contains(column.name)) {
+              await m.addColumn(table, column);
+            }
+          }
+
           if (from < 2) {
             await m.createTable(readingPositions);
           }
           if (from < 3) {
-            await m.addColumn(readingPositions, readingPositions.progress);
-            await m.addColumn(readingPositions, readingPositions.location);
+            await addColumnIfMissing(
+                readingPositions, readingPositions.progress);
+            await addColumnIfMissing(readingPositions, readingPositions.location);
           }
           if (from < 4) {
-            await m.addColumn(documents, documents.textIndexed);
+            await addColumnIfMissing(documents, documents.textIndexed);
             await customStatement(ftsCreateSql);
             await customStatement(ftsBackfillSql);
           }
           if (from < 5) {
             // Nullable column: safe ALTER ADD COLUMN, legacy rows stay NULL
             // (= oldest in sync LWW comparisons until next mutation).
-            await m.addColumn(documents, documents.updatedAt);
+            await addColumnIfMissing(documents, documents.updatedAt);
           }
           if (from < 6) {
             await m.createTable(annotations);

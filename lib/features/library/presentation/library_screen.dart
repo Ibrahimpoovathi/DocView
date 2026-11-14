@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import 'package:http/http.dart' as http;
 
 
 import '../../../app/router.dart';
@@ -67,14 +68,25 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
   void initState() {
     super.initState();
     unawaited(ref.read(textIndexRepositoryProvider).runPending());
-    if (batteryHook) unawaited(_batterySeed());
-    // Battery sync: configure the account from the define, then boot-sync
-    // (push on a data device, pull/restore on a cleared one).
-    if (batteryHook && batterySyncUrl.isNotEmpty) {
-      unawaited(_batterySyncSetup());
+    if (batteryHook) {
+      if (batteryEdgeUrl.isNotEmpty) {
+        // Edge battery: download the edge files over HTTP instead of the
+        // standard seeds.
+        unawaited(_batteryEdgeImport());
+      } else {
+        unawaited(_batterySeed());
+      }
     }
-    // Auto-sync on boot (only when a WebDAV account is configured).
-    unawaited(_autoSync());
+    // Battery sync: configure the account from the define, then boot-sync
+    // (push on a data device, pull/restore on a cleared one). Setup must
+    // complete before autoSync reads the account store — unawaited setup
+    // racing autoSync made the first boot skip the push.
+    if (batteryHook && batterySyncUrl.isNotEmpty) {
+      unawaited(_batterySyncSetup().then((_) => _autoSync()));
+    } else {
+      // Auto-sync on boot (only when a WebDAV account is configured).
+      unawaited(_autoSync());
+    }
     if (batteryHook && batterySearchTerm.isNotEmpty) {
       // Battery: exercise the FTS library-search path end to end.
       setState(() {
@@ -111,6 +123,51 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
       }
       await importer.importBytes(files);
       await Future<void>.delayed(Duration.zero);
+    }
+  }
+
+  /// Edge battery: download every file listed in the edge dir's
+  /// `_index.txt` once (sha-deduped), then open the next never-opened doc
+  /// through the real reader route — each boot advances one doc, so the
+  /// script can capture per-file reader behavior (corrupt, empty, huge,
+  /// odd formats, encrypted). Scoped storage blocks direct /sdcard reads,
+  /// so the files ride in over HTTP from the host (10.0.2.2).
+  Future<void> _batteryEdgeImport() async {
+    try {
+      final idx =
+          await http.get(Uri.parse('${batteryEdgeUrl}_index.txt'));
+      if (idx.statusCode != 200) {
+        debugPrint('[battery] edge index missing: ${idx.statusCode}');
+        return;
+      }
+      final names = utf8
+          .decode(idx.bodyBytes)
+          .split('\n')
+          .map((n) => n.trim())
+          .where((n) => n.isNotEmpty)
+          .toList();
+      final files = <String, Uint8List>{};
+      for (final name in names) {
+        final r = await http.get(Uri.parse('$batteryEdgeUrl$name'));
+        if (r.statusCode == 200) files[name] = r.bodyBytes;
+      }
+      if (files.isNotEmpty) {
+        await ref.read(importServiceProvider).importBytes(files);
+      }
+    } on Object catch (e) {
+      debugPrint('[battery] edge import failed: $e');
+    }
+    try {
+      final docs = await ref
+          .read(libraryRepositoryProvider)
+          .watchLibrary(const LibraryQuery(sort: LibrarySort.addedAt))
+          .first;
+      if (!mounted || docs.isEmpty) return;
+      final next =
+          docs.firstWhere((d) => d.lastOpenedAt == null, orElse: () => docs.first);
+      await context.push('/reader/${next.id}');
+    } on Object catch (e) {
+      debugPrint('[battery] edge open failed: $e');
     }
   }
 

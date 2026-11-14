@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'dart:isolate';
+import 'dart:typed_data';
 
 import 'package:path/path.dart' as p;
 import 'package:shelf/shelf.dart';
@@ -6,6 +8,7 @@ import 'package:shelf_router/shelf_router.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
 
 import '../../../core/paths/app_paths.dart';
+import 'fb2_to_epub.dart';
 import 'txt_to_epub.dart';
 
 /// App-owned local HTTP server for the reflow reader (foliate-js).
@@ -66,11 +69,18 @@ class BookServer {
         return Response.notFound('not found');
       }
       // foliate-js reads the whole file into a Blob; partial content is not
-      // needed but declared so zip.js stays on the plain path.
-      return _ok(
-          await file.readAsBytes(),
-          _contentTypeFor(file.path,
-              fallback: 'application/octet-stream'));
+      // needed but declared so zip.js stays on the plain path. Stream the
+      // file so a 50MB book never materialises fully in RAM per request.
+      final len = await file.length();
+      return Response.ok(
+        file.openRead(),
+        headers: {
+          'Content-Type':
+              _contentTypeFor(file.path, fallback: 'application/octet-stream'),
+          'Content-Length': '$len',
+          'Cache-Control': 'no-store',
+        },
+      );
     });
 
     router.get('/dicts/<path|.*>', (Request req) async {
@@ -86,22 +96,78 @@ class BookServer {
 
     router.get('/txt/<path|.*>', (Request req) async {
       // Plain text — convert to a generated EPUB on the fly (cached).
+      // Conversion used to run synchronously on the main isolate: a 50MB
+      // txt froze the UI for minutes and never finished. Now: size guard +
+      // background isolate + bounded LRU cache.
+      final file = _inside(AppPaths.booksDir, req.params['path'] ?? '');
+      if (file == null || !await file.exists()) {
+        return Response.notFound('not found');
+      }
+      final size = await file.length();
+      if (size > maxTxtConvertBytes) {
+        // Friendly in-reader page instead of an error the fetch layer can't
+        // describe: foliate renders this tiny EPUB like any other book.
+        return _ok(txtTooLargeEpub(size), 'application/epub+zip');
+      }
+      final cacheKey = '${file.path}#${await file.lastModified()}';
+      final cached = _convertCacheGet(cacheKey);
+      if (cached != null) return _ok(cached, 'application/epub+zip');
+      final path = file.path;
+      final converted = await Isolate.run(() {
+        final f = File(path);
+        return txtToEpub(f.readAsBytesSync());
+      });
+      _convertCachePut(cacheKey, converted);
+      return _ok(converted, 'application/epub+zip');
+    });
+
+    router.get('/fb2/<path|.*>', (Request req) async {
+      // FictionBook 2 → generated EPUB on the fly (cached, background
+      // isolate). foliate-js's in-renderer fb2.js crashed the WebView
+      // renderer during the audit battery; conversion now happens in Dart.
       final file = _inside(AppPaths.booksDir, req.params['path'] ?? '');
       if (file == null || !await file.exists()) {
         return Response.notFound('not found');
       }
       final cacheKey = '${file.path}#${await file.lastModified()}';
-      final bytes =
-          _txtCache[cacheKey] ??= txtToEpub(await file.readAsBytes());
-      return _ok(bytes, 'application/epub+zip');
+      final cached = _convertCacheGet(cacheKey);
+      if (cached != null) return _ok(cached, 'application/epub+zip');
+      final path = file.path;
+      final converted = await Isolate.run(() {
+        final f = File(path);
+        return fb2ToEpub(f.readAsBytesSync());
+      });
+      _convertCachePut(cacheKey, converted);
+      return _ok(converted, 'application/epub+zip');
     });
 
     return router;
   }
 
-  static final Map<String, List<int>> _txtCache = {};
+  /// Above this size plain text is refused with a friendly in-reader page
+  /// instead of freezing the reader (conversion cost grows superlinearly).
+  static const maxTxtConvertBytes = maxTxtConvertMb * 1024 * 1024;
 
-  static void clearTxtCache() => _txtCache.clear();
+  static const _maxConvertCacheEntries = 4;
+
+  /// LRU over on-the-fly conversions (txt→EPUB, fb2→EPUB). Results are
+  /// re-derivable; a handful of entries keeps repeat opens instant.
+  static final Map<String, Uint8List> _convertCache = {};
+
+  static Uint8List? _convertCacheGet(String key) {
+    final value = _convertCache.remove(key);
+    if (value != null) _convertCache[key] = value;
+    return value;
+  }
+
+  static void _convertCachePut(String key, Uint8List value) {
+    _convertCache[key] = value;
+    while (_convertCache.length > _maxConvertCacheEntries) {
+      _convertCache.remove(_convertCache.keys.first);
+    }
+  }
+
+  static void clearTxtCache() => _convertCache.clear();
 
   static File? _inside(Directory root, String rel) {
     final rootAbs = p.normalize(p.absolute(root.path));

@@ -18,6 +18,7 @@ optional user-owned WebDAV sync.
 | 7 | WebDAV sync (books + progress + collections, on-demand download) | Done |
 | 8 | Annotations: highlights/notes/bookmarks + sync + markdown export | Done |
 | 9 | Polish: big-library perf, tablet 2-pane, PDF password, last-synced | Done |
+| 10 | Full audit (A/B/C/D/D+) + fix-everything (Stage E): fb2 Dart pipeline, dispose/sync races, monkey re-verified | Done |
 
 Current build: **1.0.0** (Phases 0–9: shell, library, PDF reader, reflow
 readers, office readers, search — in-doc + FTS5 library full-text,
@@ -92,7 +93,7 @@ cd ~/Applications/OpenCode/DocView
 
 ## Release APK (single artifact, rewritten every update)
 
-- Deliverable: **`releases/DocView.apk`** — arm64-only release build (v1.0.0+10 ≈ 33.4 MB),
+- Deliverable: **`releases/DocView.apk`** — arm64-only release build (v1.0.1+11 ≈ 33.4 MB),
   committed to git; regenerated and *overwritten* at the end of every change.
 - Command to reproduce: `~/flutter/bin/flutter build apk --release --split-per-abi`,
   then copy `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` → `releases/DocView.apk`.

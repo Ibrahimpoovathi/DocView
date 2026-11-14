@@ -703,3 +703,132 @@ Open next: nothing planned — all README promises audited and closed.
 Possible future work: DOCX selection for dictionary/annotations
 (fork deferred from Phase 6), integration-test execution on emulator
 (host-RAM deferred), iOS/CUDA platform runs.
+
+## Stage D/D+ audit — runtime edge battery, sync-fail, tablet rotation, monkey (1.0.0+10)
+
+**Edge battery (3 rounds × 10 boots, quick_phone)** — 0 FATAL across all
+runs. Verified working: PDF password flow (prompt → wrong-password error →
+unlock 'batpass' → renders), CBZ with valid PNGs, malformed MOBI →
+graceful foliate error. Findings:
+- **HIGH huge.txt (50MB)**: reader blank at 0% for 8+ min, conversion
+  never completes — `book_server.dart` `/txt/` runs `txtToEpub`
+  synchronously on the main isolate with an unbounded `_txtCache`;
+  `/files/` serves via whole-file `readAsBytes()`.
+- **MEDIUM corrupt PDFs** (truncated/empty/garbage): raw pdfrx blue error
+  banner WITH stack trace in release — needs `errorBannerBuilder` or
+  pre-validation.
+- **MEDIUM fb2 pagination**: page 1 renders, section pages → paginator.js
+  destructure TypeError (malformed fb2) or native WebView **renderer
+  crash** `aw_browser_terminator.cc(165) code -1` (valid fb2) → blank page.
+- Verified non-bugs: boot auto-open ordering (markOpened correct via DB
+  query), empty.txt/empty.pdf sha256 dedup collision (count 9/10).
+- Test-file fixes: valid sample.fb2 XML, real-PNG sample2.cbz, fixed
+  sample.epub (`<meta>` → `<metadata>`; verified rendering on tablet).
+
+**Tooling root cause found mid-leg**: battery scripts installed the stale
+fat `app-release.apk` (edge-only defines) — sync define never baked →
+sync silently absent in earlier sync legs. All 8 tool scripts now install
+the x86_64 split APK; rebuilt APK defines verified via `strings
+libapp.so`.
+
+**Sync-fail leg (4 boots, quick_phone)**: boot1 account setup (secure
+storage write verified via shared_prefs), boot2 push (dav gains
+manifest.json/books/covers), boot3 wsgidav-down → "Sync failed:
+DioException… Connection refused" snackbar captured at ~t+6s (fails fast,
+not the 20s connect timeout), 0 FATAL, boot4 recover clean. Library
+growth 8→18 across runs is correct two-way manifest merge (old battery
+runs' differently-hashed books pulled back), not a bug.
+
+**Tablet rotation leg (pixel_tablet)**: natural landscape 2000×1200 →
+2-pane (372px library + reader) ✓; user_rotation 1 → portrait 1200×2000 →
+reader full-screen (<840dp) with reflow ✓; back to landscape → 2-pane
+restored ✓. Fixed epub renders in both orientations. 0 FATAL. Recurring
+"System UI isn't responding" dialogs are com.android.systemui ANRs
+(emulator/swiftshader artifact), never the app (no app ANR lines in
+logcat).
+
+**Monkey (Stage D+)**:
+- Stock quick_phone: 20,000 events, seed 42, throttle 50ms → exit 0,
+  0 FATAL, PSS 147→149 MB (no leak), 43 rotation flips survived.
+- Stock pixel_tablet: 20,000 events, same seed → exit 0, 0 FATAL,
+  PSS 149→149 MB, no renderer crashes.
+- **fb2 WebView renderer crash reproduced under monkey** (twice at
+  03:18:14) → blank reader state (no app crash) — Stage E HIGH.
+- Reader-stress (tool/battery_monkey_stress.sh, 6 rounds: 12+6+2 swipes,
+  chrome taps, back+reopen, rotation flips): quick_phone 0 FATAL /
+  0 renderer crashes, PSS 125→155 MB; pixel_tablet variant 0 FATAL /
+  0 renderer crashes, PSS 147→152 MB.
+- gfxinfo jank metrics unusable on swiftshader emulator (GPU percentiles
+  ≈4950ms artifact) — real-device perf check remains open.
+
+New tool: tool/battery_monkey_stress.sh (coordinate-tuned for quick_phone;
+tablet run used adapted inline coords). Probe servers: probe8081.py
+(python DAV stub used to isolate the APK-defines issue; kill when done).
+
+Stage E queue (fix everything): txtToEpub isolate+size-cap+LRU cache +
+streaming /files/; pdfrx errorBannerBuilder; fb2 paginator null-el guard
++ renderer-crash root cause; sync mount-race hardening (_batterySyncSetup
+unawaited vs _autoSync; autoSync skipped when reader unmounts library);
+all Stage A/B/C findings; fresh-epub-open progress slider 100% check;
+delete /tmp/opencode/pylib after audit.
+
+---
+
+## Stage E — fix everything found (2026-11-14, 1.0.1+11)
+
+All fixes landed, full suite green, batteries re-verified.
+
+**fb2 renderer crash — root-caused and fixed (HIGH)**: opening fb2 crashed
+the WebView renderer (aw_browser_terminator code -1) → route unmounted →
+dispose cascade (pdfrx null _state + unmounted-ref errors) → blank gray
+screen. Fix: new lib/features/reader/data/fb2_to_epub.dart converts
+FictionBook 2 → EPUB 3 entirely in Dart (sections/titles, p/poem/cite/
+epigraph, inline styling, anchors, tables, base64 `binary` images as data
+URIs; labeled blocks keep TOC entries, 12k-char chunks; text escaping).
+book_server.dart gained an LRU-cached, isolate-based `/fb2/` route
+(_convertCache replaces _txtCache); reflow_screen routes DocFormat.fb2
+docs to it — foliate fb2.js is now never used. Verified on quick_phone:
+fb2 opens, h1/h2 + paragraphs render, pagination works, TOC-sheet and
+annotations-sheet open cleanly, 0 FATAL / 0 exceptions. 3 unit tests in
+test/fb2_epub_test.dart (sections+metadata, empty body/unknown elements,
+escaping + long-section split).
+
+**Dispose cascade (HIGH)**: reader_screen._flushSave no longer touches
+pdfrx for non-PDF docs (null _state crash); reflow_screen captures
+ReadingRepository in a late field at initState — dispose/Timer callbacks
+never call ref.read (unmounted-ref crash).
+
+**WebView resilience**: reflow_screen onRenderProcessGone now swaps in a
+friendly EmptyState instead of leaving a dead blank webview.
+
+**Sync (HIGH)**: library_screen chains `_batterySyncSetup().then(_autoSync)`
+— account save must complete before boot auto-sync reads the store (first
+boot could silently skip the push); SyncEngine.run() gained a static
+re-entrancy guard (overlapping boot/import/manual syncs returned an empty
+SyncResult instead of interleaving manifest read-modify-writes).
+
+**Other fixes**: pdfrx errorBannerBuilder → friendly EmptyState for
+corrupt PDFs (was raw stack-trace banner); database.dart onUpgrade guards
+every ALTER ADD COLUMN with a PRAGMA table_info check (duplicate-column
+crash on partially upgraded DBs); text_index pending backlog now indexes
+newest docs first; _ensurePdfText dedupes in-flight loads (paint callbacks
+can fire per frame) + bounds its cache (clears past 64 pages); PDF
+annotations list now reloads _annotations after sheet edits (stale
+overlay); office_screens XLSX/TextDoc dispose their ScrollControllers;
+reflow _dictDebounce cancelled in dispose; all stray reflow prints
+removed; intl + cupertino_icons dropped from pubspec; docview.html
+docviewToc dead `walk` duplicate removed.
+
+**Verification**: flutter analyze clean; full test suite 72/72 green.
+Same-seed (42) 20k-event stock monkey re-run: exit 0, 0 FATAL, 0 ANRs,
+0 renderer crashes, PSS 150 MB, 54 flips. (First same-seed attempt on a
+memory-starved host hit an ANR at event 14487 — ANR trace showed the main
+thread idle in epoll, 18% iowait, host down to 916 MB available; same seed
+passed cleanly on a fresh boot. Environmental, not an app regression.)
+Sync leg re-verified with the new APK: boot 1 push (manifest 8 docs +
+books + covers within 60 s of cold start — race fix proven), boot 2
+restore (Library · 13, covers render), 0 FATAL across both boots.
+
+**Release**: version bumped to 1.0.1+11; releases/DocView.apk rebuilt from
+app-arm64-v8a-release.apk (33.4 MB); prod APK verified free of battery
+defines (strings check: 0 hits for 10.0.2.2).

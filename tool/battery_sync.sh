@@ -58,7 +58,7 @@ done
 log "boot done ($i s)"
 
 "$ADB" shell pm uninstall com.docview.docview >/dev/null 2>&1
-"$ADB" install -r "$PROJ/build/app/outputs/flutter-apk/app-release.apk" \
+"$ADB" install -r "$PROJ/build/app/outputs/flutter-apk/app-x86_64-release.apk" \
   >> "$OUT/${NAME}_sync.log" 2>&1 && log "install ok" || log "INSTALL FAILED"
 
 if [ "$MODE" = restore ]; then

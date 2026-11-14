@@ -147,6 +147,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
 
   void _flushSave() {
     if (!_canSave) return;
+    // pdf-only state: pdfrx controllers are never attached for reflow/office
+    // formats, so pageNumber would throw on their unmounted null _state.
+    if (_doc!.format != DocFormat.pdf) return;
     final n = _ctl.pageNumber;
     if (n == null) return;
     _saveDebounce?.cancel();
@@ -209,10 +212,24 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
 
   /// Lazily loads a page's structured text so the highlight painter can
   /// map char indices to rects; triggers a repaint once loaded.
+  ///
+  /// In-flight page loads are deduped — paint callbacks can fire per frame
+  /// and would otherwise stack duplicate loadStructuredText futures.
+  final _pdfTextPending = <int>{};
+
   Future<void> _ensurePdfText(int pageNumber) async {
     if (_pdfTextCache.containsKey(pageNumber)) return;
-    _pdfTextCache[pageNumber] =
-        await _ctl.document.pages[pageNumber - 1].loadStructuredText();
+    if (!_pdfTextPending.add(pageNumber)) return;
+    try {
+      _pdfTextCache[pageNumber] =
+          await _ctl.document.pages[pageNumber - 1].loadStructuredText();
+      // Bounded cache: text pages are only needed for visible annotations.
+      if (_pdfTextCache.length > 64) _pdfTextCache.clear();
+    } on Object {
+      // Best effort: annotations on unreadable pages simply don't paint.
+    } finally {
+      _pdfTextPending.remove(pageNumber);
+    }
     if (mounted) setState(() {});
   }
 
@@ -454,6 +471,22 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                   final page = anchor.page ?? _pageNumber;
                   _ctl.goToPage(pageNumber: page);
                 },
+                // Edits made from the sheet must repaint the PDF overlay:
+                // _annotations is a snapshot, so reload it after each change.
+                onUpdateColor: (ann, color) async {
+                  final list = await ref
+                      .read(annotationsRepositoryProvider)
+                      .listForDoc(_doc!.id);
+                  if (!mounted) return;
+                  setState(() => _annotations = list);
+                },
+                onDelete: (ann) async {
+                  final list = await ref
+                      .read(annotationsRepositoryProvider)
+                      .listForDoc(_doc!.id);
+                  if (!mounted) return;
+                  setState(() => _annotations = list);
+                },
               ),
             ),
           if (_canSave)
@@ -508,10 +541,22 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
               controller: _ctl,
               initialPageNumber: _initialPage ?? 1,
               passwordProvider: _pdfPasswordProvider,
-              params: pdfrx.PdfViewerParams(
+                params: pdfrx.PdfViewerParams(
                 backgroundColor: _colorMode == ViewerColorMode.dark
                     ? const Color(0xFF211D19)
                     : cs.surfaceContainerHighest.withValues(alpha: 0.75),
+                errorBannerBuilder: (context, error, stackTrace, documentRef) {
+                  // Corrupt/unsupported PDFs showed a raw stack-trace banner;
+                  // give a friendly full-screen message with a way out.
+                  return EmptyState(
+                    icon: Icons.picture_as_pdf_outlined,
+                    heading: 'Could not open this PDF',
+                    body: 'The file appears to be damaged, password-protected '
+                        'beyond repair, or not a real PDF.',
+                    actionLabel: 'Back',
+                    onAction: () => context.pop(),
+                  );
+                },
                 pageImageColorFilter: _filterFor(_colorMode),
                 pagePaintCallbacks: [
                   ?_searcher?.pageTextMatchPaintCallback,

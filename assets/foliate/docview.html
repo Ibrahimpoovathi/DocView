@@ -287,16 +287,7 @@ window.docviewToc = async () => {
   const toc = view.toc ?? null
   if (!toc) return null
   const out = []
-  const walk = (nodes, depth) => {
-    for (const n of nodes) {
-      out.push({
-        label: typeof n.label === 'string' ? n.label.trim() : '',
-        href: n.href?.() ?? null,
-        subitems: Array.isArray(n.subitems),
-      })
-    }
-  }
-  // depth-first walk with depth
+  // Depth-first walk with depth for indent rendering in the Dart sheet.
   const record = (nodes, depth) => {
     for (const n of nodes) {
       out.push({

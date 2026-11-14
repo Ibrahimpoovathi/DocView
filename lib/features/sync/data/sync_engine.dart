@@ -65,7 +65,34 @@ class SyncEngine {
   /// Coarse progress for UI ("Pulling manifest…", "Uploading 2/5 …").
   final void Function(String step)? onStep;
 
+  /// Re-entrancy guard: boot auto-sync, import auto-sync and a manual
+  /// "Sync now" can overlap; interleaved runs would read-modify-write the
+  /// manifest against each other and corrupt reconciliation.
+  static bool _running = false;
+
   Future<SyncResult> run() async {
+    if (_running) {
+      // No-op: a sync is already in flight; report an empty result.
+      return const SyncResult(
+        uploadedBooks: 0,
+        uploadedCovers: 0,
+        newRemoteDocs: 0,
+        mergedMetadata: 0,
+        appliedTombstones: 0,
+        appliedUndeletes: 0,
+        mergedPositions: 0,
+        mergedAnnotations: 0,
+      );
+    }
+    _running = true;
+    try {
+      return await _runGuarded();
+    } finally {
+      _running = false;
+    }
+  }
+
+  Future<SyncResult> _runGuarded() async {
     await _dav.ensureDirs();
 
     onStep?.call('Reading manifest…');

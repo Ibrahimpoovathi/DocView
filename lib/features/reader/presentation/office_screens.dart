@@ -323,6 +323,12 @@ class _XlsxScreenState extends OfficeReaderState<XlsxScreen> {
   static const _rowCap = 3000;
 
   @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  @override
   Document? get doc => widget.doc;
 
   @override
@@ -622,6 +628,12 @@ class TextDocScreen extends ConsumerStatefulWidget {
 class _TextDocScreenState extends OfficeReaderState<TextDocScreen> {
   List<OdtParagraph> _paragraphs = const [];
   final _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
 
   @override
   Document? get doc => widget.doc;

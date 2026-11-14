@@ -29,7 +29,10 @@ class TextIndexRepository {
       final rows = await (_db.select(t)
             ..where((d) =>
                 d.deletedAt.isNull() & d.textIndexed.equals(0))
-            ..orderBy([(u) => OrderingTerm(expression: u.id)]))
+            // Newest first: freshly imported docs are the ones the user is
+            // most likely to search next; stale backlog trails behind.
+            ..orderBy([(u) => OrderingTerm(
+                expression: u.id, mode: OrderingMode.desc)]))
           .get();
 
       for (final doc in rows.take(batch)) {

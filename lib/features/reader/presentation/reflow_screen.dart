@@ -16,6 +16,7 @@ import '../../../core/format/doc_format.dart';
 import '../../../core/storage/database.dart';
 import '../data/book_server.dart';
 import '../data/foliate_assets.dart';
+import '../data/reading_repository.dart';
 import '../domain/annotations.dart';
 import '../../library/presentation/providers.dart';
 import '../../dictionary/presentation/dictionary_sheet.dart';
@@ -66,6 +67,10 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
   String? _error;
 
   Timer? _saveDebounce;
+
+  /// Reading repo captured in initState — dispose() flushes progress and
+  /// must not call ref.read (unmounted-ref crash during the audit battery).
+  late final ReadingRepository _readingRepo;
   ViewerColorMode _colorMode = ViewerColorMode.normal;
 
   // In-document search (foliate view.search behind the WebView bridge).
@@ -91,6 +96,8 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
   @override
   void initState() {
     super.initState();
+    // Captured eagerly: dispose() flushes progress and must not touch ref.
+    _readingRepo = ref.read(readingRepositoryProvider);
     WidgetsBinding.instance.addObserver(this);
     _prepare();
   }
@@ -105,6 +112,7 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
     WidgetsBinding.instance.removeObserver(this);
     _flushSave();
     _searchDebounce?.cancel();
+    _dictDebounce?.cancel();
     _searchCtrl.dispose();
     unawaited(BookServer.stop());
     super.dispose();
@@ -113,9 +121,7 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
   Future<void> _flushSave() async {
     if (!_canSave) return;
     _saveDebounce?.cancel();
-    await ref
-        .read(readingRepositoryProvider)
-        .saveProgress(_doc!.id, _fraction, _location);
+    await _readingRepo.saveProgress(_doc!.id, _fraction, _location);
   }
 
   Future<void> _prepare() async {
@@ -139,11 +145,7 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
   }
 
   Future<WebUri> _ensureBookUrl() =>
-      _bookUrlFuture ??= _bookUrl().then((u) {
-        print('[reflow] url=$u');
-        return u;
-      }).catchError((Object e) {
-        print('[reflow] ERROR $e');
+      _bookUrlFuture ??= _bookUrl().catchError((Object e) {
         // ignore: invalid_use_of_protected_member
         setState(() => _error = e.toString());
         throw e;
@@ -166,7 +168,9 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
       final enc = rel.split('/').map(Uri.encodeComponent).join('/');
       sourceUrl = _doc!.format == DocFormat.txt
           ? '$base/txt/$enc'
-          : '$base/files/$enc';
+          : _doc!.format == DocFormat.fb2
+              ? '$base/fb2/$enc'
+              : '$base/files/$enc';
     }
 
     final q = StringBuffer(
@@ -185,9 +189,8 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
     if (!_canSave) return;
     _saveDebounce?.cancel();
     _saveDebounce = Timer(const Duration(milliseconds: 600), () {
-      ref
-          .read(readingRepositoryProvider)
-          .saveProgress(_doc!.id, _fraction, _location);
+      // Timer callbacks can fire after unmount; _readingRepo is field-safe.
+      _readingRepo.saveProgress(_doc!.id, _fraction, _location);
     });
   }
 
@@ -706,6 +709,16 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
                         supportZoom: true,
                         useHybridComposition: true,
                       ),
+                      onRenderProcessGone: (controller, detail) async {
+                        // Renderer crash (native WebView bug) used to leave a
+                        // blank route; rebuild the webview with a friendly
+                        // banner instead.
+                        if (!mounted) return;
+                        setState(() => _error =
+                            'The document viewer crashed while rendering. '
+                            'Reopening may help.');
+                        _web = null;
+                      },
                       onWebViewCreated: (c) {
                         _web = c;
                         c.addJavaScriptHandler(
@@ -795,7 +808,6 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
                           handlerName: 'onReflowError',
                           callback: (args) {
                             final info = args.isEmpty ? '' : '${args.first}';
-                            print('[reflow] page error: $info');
                             if (mounted) {
                               setState(() => _error = info);
                             }
@@ -844,7 +856,6 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
                                 _hits.isEmpty &&
                                 hits.isEmpty &&
                                 payload['failed'] != null) {
-                              print('[reflow] search failed: ${payload['failed']}');
                             }
                             setState(() {
                               _searching = false;
