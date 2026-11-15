@@ -100,7 +100,7 @@ class _DictionarySheetState extends ConsumerState<_DictionarySheet> {
     }
     DictionaryEntry? onlineEntry;
     final onlineEnabled =
-        prefs.getBool('docview.onlineDictionary') ?? true;
+        prefs.getBool('docview.onlineDictionary') ?? false;
     if (onlineEnabled) {
       onlineEntry =
           await ref.read(onlineDictionaryProvider).lookup(widget.word);

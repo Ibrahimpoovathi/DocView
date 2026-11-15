@@ -179,14 +179,16 @@ void main() {
     expect((await repo.byUuid(b.uuid))!.note, 'keep me');
   });
 
-  test('v6 migration path creates the annotations table on create', () async {
+  test('latest schema creates the annotations table and tombstones', () async {
     // In-memory DBs always start at the latest schema (onCreate runs
-    // createAll); assert the v6 table exists and the version marker says 6.
+    // createAll); assert the table set and the version marker.
     final version = await db
         .customSelect('PRAGMA user_version')
         .getSingle()
         .then((row) => row.data.values.first as int);
-    expect(version, 6);
+    expect(version, 7);
     expect(db.allTables.map((t) => t.actualTableName), contains('annotations'));
+    expect(db.allTables.map((t) => t.actualTableName), contains('collections'));
+    expect(db.allTables.map((t) => t.actualTableName), contains('tags'));
   });
 }

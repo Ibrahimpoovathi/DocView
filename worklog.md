@@ -832,3 +832,73 @@ restore (Library · 13, covers render), 0 FATAL across both boots.
 **Release**: version bumped to 1.0.1+11; releases/DocView.apk rebuilt from
 app-arm64-v8a-release.apk (33.4 MB); prod APK verified free of battery
 defines (strings check: 0 hits for 10.0.2.2).
+
+## Stage F — second-audit fixes + DOCX pagination (2026-11-15, 1.0.2+12)
+
+**DOCX now opens as a paginated PDF.** `docx_creator`'s `PdfExporter`
+converts the .docx in an isolate (`lib/features/reader/data/docx_pdf.dart`)
+into `books/<uuid>/docview-converted.pdf`, cached until the book is deleted
+(re-import gives a fresh uuid so the cache can never go stale). The reader
+shows it in pdfrx with a page indicator; search remains paragraph-based and
+maps hits → pages, progress is stored as a page number. Files >20 MB (or
+unparsable) fall back to the old `docx_file_viewer` widget. Verified on
+quick_phone: A4 page card, table/bullets render, "Page 1 of 1", PDF load
+26 ms. Real page geometry was the Phase-1 item that was silently missing.
+
+**Storage waste**: import now always clears file_picker's temp copies in a
+`finally`; the document options sheet offers "Remove local copy (keep in
+cloud)" (confirm dialog) when a WebDAV account exists, and the library
+re-checks cloud-only state via `localCopyRevisionProvider`. Originals are
+never moved/deleted (Option A).
+
+**Release blockers**: (1) adaptive launcher icon generated at every density
++ Android-13 monochrome (`/tmp/opencode/make_icon.py`, serif "D" + amber
+rule); (2) signed release keystore outside git (`~/.docview-keystore/`,
+`android/key.properties` 600 + gitignored), debug fallback for CI-less
+builds; (3) open-with/share — manifest VIEW/SEND filters (content+file
+URIs, full mime list, extension pathPatterns, `<queries>`), `MainActivity`
+MethodChannel `docview/open_with` with `takePending`/`onNewIntent`,
+content URIs copied to `cacheDir/open_with`; imports route straight into
+the reader and delete the temp copy; (4) cleartext limited to 127.0.0.1 /
+localhost (+10.0.2.2 for the emulator battery) via
+`network_security_config.xml`; Settings rejects non-https WebDAV except
+loopback.
+
+**Correctness**: re-import of a deleted book no longer crashes on
+`UNIQUE(sha256)` — `findBySha256(includeDeleted)` + `reviveDocument`
+(reuses uuid, resyncs FTS meta); BookServer gained a per-launch random
+token (query/header/cookie `dv_t`, Set-Cookie for module imports, unknown →
+404) threaded through reflow and dictionary URLs; annotations are
+uuid-addressed in `docview.html` (`annotationsByValue` arrays +
+`annotationsByUuid`), fixes duplicate-CFI highlights; anchor parsing is
+lenient + memoised (`tryParseAnchor`); FB2 decoding handles UTF-8/UTF-16
+BOMs, declaration charsets and cp1251 bodies, escapes `"` in attributes and
+caps conversion at 15 MB with a friendly page; TXT cap got the same page;
+PDF text extraction now reads page 0 (was 1); dictionary lookup times out
+at 5 s and online lookup defaults off; `createCollection` returns the
+existing row instead of throwing; one poisonous document no longer stalls
+the background indexer; schema v7 + manifest v3 add collection/tag
+tombstones with LWW merges (deletions win ties); sync downloads stream to
+`.part`, verify the sha256 while hashing and only then rename; covers are
+fetched outside the DB transaction.
+
+**Perf/polish**: import sha256 + EPUB metadata extraction in isolates; XLSX
+virtualised (fixed row extent, sampled column widths, horizontal
+scroll); theme switches repaint in place via `docviewSetColor` instead of
+rebuilding the WebView; CSP meta on both HTML assets; MIT LICENSE + OFL
+texts for the bundled fonts; `deleteDocument` cascades positions/group
+links and tombstones annotations.
+
+**Verification**: `flutter analyze` clean; `flutter test` 79/79 green (new
+`test/regression_test.dart`: DOCX→PDF geometry/cache, re-import revival,
+collection/tag tombstones, legacy manifest, cp1251 FB2, BookServer token).
+Battery x86_64 build: DOCX page-geometry screenshot, resume round-trip, 0
+FATAL; WebDAV restore after `pm clear` pulled all 8 books via the new
+streaming+sha path, manifest v3 on the server, 0 FATAL (one host-load
+"System UI isn't responding" dialog — known emulator artifact, app had no
+ANR). Edge leg not re-run this round (its `/dav/edge` needs an anonymous
+host mount; previously verified in Stage D).
+
+**Release**: 1.0.2+12, `releases/DocView.apk` rebuilt from
+`app-arm64-v8a-release.apk` (34.7 MB), signed with the new DocView
+keystore (CN=DocView), battery defines absent (strings check: 0 hits).

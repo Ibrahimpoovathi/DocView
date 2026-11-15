@@ -12,7 +12,7 @@ optional user-owned WebDAV sync.
 | 1 | Import + library (covers, recents, collections, tags, continue-reading) | Done |
 | 2 | PDF reader (pdfrx: TOC, search, bookmarks, dark/fit modes, progress) | Done |
 | 3 | Reflow readers (foliate-js: EPUB/MOBI/AZW3/FB2/TXT, CBZ pager, themes) | Done |
-| 4 | Office: DOCX native, XLSX tables, PPTX/DOC/ODT/RTF text-first | Done |
+| 4 | Office: DOCX (paginated PDF, real page geometry), XLSX tables, PPTX/DOC/ODT/RTF text-first | Done |
 | 5 | Search (in-doc + library FTS5), dictionary popup (offline + online) | Done |
 | 6 | Dictionary popup (offline StarDict + online fallback, tap-to-lookup) | Done |
 | 7 | WebDAV sync (books + progress + collections, on-demand download) | Done |
@@ -76,7 +76,8 @@ for the chronological build log.
 - **State:** flutter_riverpod 3 · **Nav:** go_router · **DB:** drift (SQLite, FTS5 in P5)
 - **PDF:** pdfrx 2.x (MIT, pdfium) · **Reflow:** foliate-js in flutter_inappwebview
   (6.2.0-beta.3, pinned — see STUDY.md §4 for the AGP build saga)
-- **Office:** docx_file_viewer + docx_creator · excel_plus · office_oxide_ffi
+- **Office:** docx_creator (`PdfExporter`) · docx_file_viewer (oversize fallback) ·
+  excel_plus · office_oxide_ffi
 - **Sync (P6/P8):** webdav_client_plus 3.0.0 · flutter_secure_storage ·
   **Import:** file_picker
 
@@ -93,7 +94,7 @@ cd ~/Applications/OpenCode/DocView
 
 ## Release APK (single artifact, rewritten every update)
 
-- Deliverable: **`releases/DocView.apk`** — arm64-only release build (v1.0.1+11 ≈ 33.4 MB),
+- Deliverable: **`releases/DocView.apk`** — arm64-only release build (v1.0.2+12 ≈ 34.7 MB),
   committed to git; regenerated and *overwritten* at the end of every change.
 - Command to reproduce: `~/flutter/bin/flutter build apk --release --split-per-abi`,
   then copy `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` → `releases/DocView.apk`.
@@ -101,9 +102,9 @@ cd ~/Applications/OpenCode/DocView
   (`app-x86_64-release.apk`) — never committed.
 - Version bumps: pubspec `version` + worklog note each update.
 
-### Test results at current build (1.0.0+10)
+### Test results at current build (1.0.2+12)
 
-Static: `flutter analyze` — 0 issues; `flutter test` — 63/63 pass
+Static: `flutter analyze` — 0 issues; `flutter test` — 79/79 pass
 (format detection, repository CRUD + soft delete + reflow saveProgress,
 import pipeline incl. dedupe-by-sha256, TXT→EPUB converter,
 PPTX/ODT/RTF extractors, empty-library widget test, FTS5 metadata/body
@@ -112,7 +113,10 @@ history + MockClient online lookup, dictzip round-trip + StarDict ifo
 parsing + article decoding, sync manifest round-trip + push/pull
 restore + position LWW + tombstones + collection/tag merge against an
 in-memory fake WebDAV, annotation repository CRUD + remote upsert LWW
-(deletion-dominant ties) + annotation sync merge both directions).
+(deletion-dominant ties) + annotation sync merge both directions,
+DOCX→PDF conversion/page geometry/caching, re-import revival of
+soft-deleted rows, collection/tag tombstone revive, legacy manifest
+parsing, cp1251 FB2 decoding, BookServer token rejection).
 
 AVD battery (install, cold launch, screenshot review, FATAL/ANR logcat scan;
 run via `tool/battery_all.sh` → per-AVD `tool/battery_one.sh <avd>`):
@@ -298,8 +302,10 @@ section's text walker), creates highlight + note + bookmark, syncs, and
 captures the annotations list; the battery seed idempotency guard now
 matches `battery.%` names too (partial imports could lack `mini.pdf`).
 
-**Phase 4 notes**: DOCX = `docx_file_viewer` native widgets (search/zoom/
-selection); XLSX/XLS = `excel_plus` table reader (styled header, sheet
+**Phase 4 notes**: DOCX = `docx_creator` `PdfExporter` renders the file to a
+cached PDF (isolate, real A4/Letter geometry, margins, page breaks) shown in
+pdfrx with search/page indicator; documents over 20 MB fall back to the
+`docx_file_viewer` widgets (search/zoom/selection). XLSX/XLS = `excel_plus` table reader (styled header, sheet
 tabs, first 3000 rows); PPTX/ODT/RTF = hand-rolled extractors
 (`pptx_text.dart`, `odt_text.dart`, `rtf_text.dart`) with per-slide detail
 or scrollable text; DOC/PPT (legacy binary) deferred to a later phase and
@@ -308,7 +314,8 @@ show the "not supported yet" stub screen. Readers share
 the `progress` location columns; xlsx also persists the sheet name).
 
 **Android runtime notes**: manifest adds `INTERNET` (loopback BookServer
-socket) + `usesCleartextTraffic` (loopback http) and disables Impeller for
+socket) and a `network_security_config` that permits cleartext only for
+loopback (everything else, incl. WebDAV, must be TLS); disables Impeller for
 this app (`EnableImpeller=false` — compositing of the WebView platform view
 under Impeller never painted; pure-Flutter UI was unaffected). foliate-js
 assets are vendored under `assets/foliate/ext/` (`vendor/` is excluded by

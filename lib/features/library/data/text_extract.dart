@@ -74,7 +74,7 @@ Future<String> _pdf(String path) async {
   try {
     final buf = StringBuffer();
     final pageCount = doc.pages.length;
-    for (var i = 1; i < pageCount && i <= _maxPdfPages; i++) {
+    for (var i = 0; i < pageCount && i < _maxPdfPages; i++) {
       final text = await doc.pages[i].loadText();
       if (text != null && text.fullText.isNotEmpty) {
         buf.writeln(text.fullText);

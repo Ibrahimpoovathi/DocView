@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:drift/drift.dart';
 import 'package:path/path.dart' as p;
 
@@ -140,13 +141,20 @@ class SyncEngine {
       for (final e in localBySha.entries) e.key: e.value.id,
     };
 
+    // Covers are fetched after the transaction: reading a cover inside it
+    // held the DB lock across network round-trips (blocks every UI query).
+    final pendingCovers = <({String sha, String path})>[];
+
     await _db.transaction(() async {
       // 1. Documents (metadata LWW + tombstones).
       for (final rd in remote.documents) {
         final ld = localBySha[rd.sha256];
         if (ld == null) {
-          final newId = await _insertRemoteDoc(rd, remoteBooks, remoteCovers);
-          shaToId[rd.sha256] = newId;
+          final inserted = await _insertRemoteDoc(rd, remoteBooks, remoteCovers);
+          shaToId[rd.sha256] = inserted.id;
+          if (inserted.coverPath != null) {
+            pendingCovers.add((sha: rd.sha256, path: inserted.coverPath!));
+          }
           newDocs++;
           continue;
         }
@@ -262,7 +270,7 @@ class SyncEngine {
       }
 
       // 3. Collections & tags by name; joins merged.
-      await _mergeNames(remote.collections, _db.collections);
+      await _mergeNames(remote.collections);
       await _mergeTags(remote.tags);
       await _mergeJoins(remote);
 
@@ -291,6 +299,18 @@ class SyncEngine {
       }
     });
 
+    for (final pending in pendingCovers) {
+      try {
+        final bytes = await _dav.readCover(pending.sha);
+        if (bytes == null) continue;
+        final file = File(pending.path);
+        await file.create(recursive: true);
+        await file.writeAsBytes(bytes);
+      } on Object {
+        // Covers are cosmetic; the book row is already usable.
+      }
+    }
+
     return (
       newDocs: newDocs,
       metadata: metadata,
@@ -301,8 +321,8 @@ class SyncEngine {
     );
   }
 
-  Future<int> _insertRemoteDoc(SyncDoc rd, Map<String, int> remoteBooks,
-      Set<String> remoteCovers) async {
+  Future<({int id, String? coverPath})> _insertRemoteDoc(
+      SyncDoc rd, Map<String, int> remoteBooks, Set<String> remoteCovers) async {
     // Recover the original file name from the remote book file listing
     // (books are stored as `<sha256>__<originalName>`); fall back to a
     // synthetic name so storedPath can still be planned.
@@ -345,14 +365,7 @@ class SyncEngine {
     // Metadata-only FTS row so remote titles are searchable before download.
     await _upsertFtsMeta(id, rd.title, rd.author);
 
-    if (coverPath != null) {
-      final bytes = await _dav.readCover(rd.sha256);
-      if (bytes != null) {
-        await File(coverPath).create(recursive: true);
-        await File(coverPath).writeAsBytes(bytes);
-      }
-    }
-    return id;
+    return (id: id, coverPath: coverPath);
   }
 
   Future<void> _softDeleteLocal(Document ld) async {
@@ -373,27 +386,64 @@ class SyncEngine {
     await _upsertFtsMeta(ld.id, ld.title, ld.author);
   }
 
-  Future<void> _mergeNames(List<String> names, $CollectionsTable table) async {
+  /// Merges collection names + tombstones (LWW, deletion-dominant on ties).
+  Future<void> _mergeNames(List<SyncName> names) async {
     final existing = await _db.select(_db.collections).get();
-    final have = existing.map((c) => c.name).toSet();
-    for (final name in names) {
-      if (!have.contains(name)) {
-        await _db.into(_db.collections).insert(
-              CollectionsCompanion.insert(name: name),
-            );
+    final byName = {for (final c in existing) c.name: c};
+    for (final remote in names) {
+      if (remote.name.isEmpty) continue;
+      final local = byName[remote.name];
+      if (local == null) {
+        if (remote.deletedAt != null) continue; // nothing local to remove
+        await _db.into(_db.collections).insert(CollectionsCompanion.insert(
+              name: remote.name,
+              updatedAt: Value(remote.updatedAt),
+            ));
+        continue;
       }
+      final remoteAt = remote.mutation;
+      if (remoteAt == null) continue;
+      final localAt = local.deletedAt ?? local.updatedAt ?? local.createdAt;
+      final apply = remote.deletedAt != null
+          ? !localAt.isAfter(remoteAt)
+          : remoteAt.isAfter(localAt);
+      if (!apply) continue;
+      await (_db.update(_db.collections)
+            ..where((c) => c.id.equals(local.id)))
+          .write(CollectionsCompanion(
+        deletedAt: Value(remote.deletedAt),
+        updatedAt: Value(remote.updatedAt),
+      ));
     }
   }
 
-  Future<void> _mergeTags(List<String> names) async {
+  /// Merges tag names + tombstones (LWW, deletion-dominant on ties).
+  Future<void> _mergeTags(List<SyncName> names) async {
     final existing = await _db.select(_db.tags).get();
-    final have = existing.map((t) => t.name).toSet();
-    for (final name in names) {
-      if (!have.contains(name)) {
-        await _db
-            .into(_db.tags)
-            .insert(TagsCompanion.insert(name: name));
+    final byName = {for (final t in existing) t.name: t};
+    for (final remote in names) {
+      if (remote.name.isEmpty) continue;
+      final local = byName[remote.name];
+      if (local == null) {
+        if (remote.deletedAt != null) continue;
+        await _db.into(_db.tags).insert(TagsCompanion.insert(
+              name: remote.name,
+              updatedAt: Value(remote.updatedAt),
+            ));
+        continue;
       }
+      final remoteAt = remote.mutation;
+      if (remoteAt == null) continue;
+      final localAt = local.deletedAt ?? local.updatedAt ?? local.createdAt;
+      final apply = remote.deletedAt != null
+          ? !localAt.isAfter(remoteAt)
+          : remoteAt.isAfter(localAt);
+      if (!apply) continue;
+      await (_db.update(_db.tags)..where((t) => t.id.equals(local.id)))
+          .write(TagsCompanion(
+        deletedAt: Value(remote.deletedAt),
+        updatedAt: Value(remote.updatedAt),
+      ));
     }
   }
 
@@ -401,9 +451,15 @@ class SyncEngine {
     final docs = await _docsBySha();
     final shaToId = {for (final e in docs.entries) e.key: e.value.id};
     final collections = await _db.select(_db.collections).get();
-    final colByName = {for (final c in collections) c.name: c.id};
+    final colByName = {
+      for (final c in collections)
+        if (c.deletedAt == null) c.name: c.id,
+    };
     final tags = await _db.select(_db.tags).get();
-    final tagByName = {for (final t in tags) t.name: t.id};
+    final tagByName = {
+      for (final t in tags)
+        if (t.deletedAt == null) t.name: t.id,
+    };
 
     final existingColJoins = await _db.select(_db.documentCollections).get();
     final haveCol = existingColJoins
@@ -533,8 +589,20 @@ class SyncEngine {
       documents: docRows,
       positions: posRows,
       annotations: annRows,
-      collections: collections.map((c) => c.name).toList(),
-      tags: tags.map((t) => t.name).toList(),
+      collections: collections
+          .map((c) => SyncName(
+                name: c.name,
+                updatedAt: c.updatedAt,
+                deletedAt: c.deletedAt,
+              ))
+          .toList(),
+      tags: tags
+          .map((t) => SyncName(
+                name: t.name,
+                updatedAt: t.updatedAt,
+                deletedAt: t.deletedAt,
+              ))
+          .toList(),
       documentCollections: colLinks,
       documentTags: tagLinks,
       syncedAt: DateTime.now(),
@@ -554,9 +622,27 @@ class SyncEngine {
     final name = remoteBooks.keys.where((n) => _shaOf(n) == doc.sha256).firstOrNull;
     if (name == null) return false;
 
-    final bytes = await _dav.readBook(name, onProgress: onProgress);
     await Directory(p.dirname(doc.storedPath)).create(recursive: true);
-    await f.writeAsBytes(bytes);
+    final part = File('${doc.storedPath}.part');
+    try {
+      // Stream to a .part file: a 500MB book must not be buffered in RAM.
+      await _dav.downloadBook(name, part, onProgress: onProgress);
+      // Verify integrity before replacing a good local copy; a truncated
+      // transfer would otherwise become a corrupt, unopenable book.
+      final actual = await _sha256OfFile(part);
+      if (actual != doc.sha256) {
+        await part.delete();
+        return false;
+      }
+      await part.rename(f.path);
+    } on Object {
+      try {
+        if (await part.exists()) await part.delete();
+      } on Object {
+        // Cleanup is best-effort.
+      }
+      rethrow;
+    }
 
     // Body extraction can now run (cloud rows were inserted pre-indexed).
     if (doc.textIndexed == 1) {
@@ -581,6 +667,17 @@ class SyncEngine {
   }
 
   // --- helpers --------------------------------------------------------------
+
+  /// Streaming sha256 of a file (no full-file read into memory).
+  static Future<String> _sha256OfFile(File file) async {
+    final output = _DigestSink();
+    final input = sha256.startChunkedConversion(output);
+    await for (final chunk in file.openRead()) {
+      input.add(chunk);
+    }
+    input.close();
+    return output.value.toString();
+  }
 
   /// Empty-body FTS row keeping remote metadata searchable pre-download.
   Future<void> _upsertFtsMeta(int id, String title, String? author) =>
@@ -639,4 +736,16 @@ class SyncEngine {
         ? remoteName
         : remoteName.substring(i + 2);
   }
+}
+
+/// Minimal single-value sink for chunked digest conversion.
+class _DigestSink implements Sink<Digest> {
+  Digest? _value;
+  Digest get value => _value!;
+
+  @override
+  void add(Digest data) => _value = data;
+
+  @override
+  void close() {}
 }

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 /// Annotation kinds stored per document.
 enum AnnotationKind { highlight, note, bookmark }
 
@@ -17,10 +19,10 @@ class AnnotationAnchor {
 
   factory AnnotationAnchor.fromJson(Map<String, Object?> json) =>
       AnnotationAnchor(
-        cfi: json['cfi'] as String?,
-        page: json['page'] as int?,
-        start: json['start'] as int?,
-        end: json['end'] as int?,
+        cfi: json['cfi'] is String ? json['cfi'] as String : null,
+        page: (json['page'] as num?)?.toInt(),
+        start: (json['start'] as num?)?.toInt(),
+        end: (json['end'] as num?)?.toInt(),
       );
 
   final String? cfi;
@@ -47,4 +49,26 @@ String newAnnotationUuid() {
   final tail =
       DateTime.now().microsecondsSinceEpoch.toRadixString(36).substring(0, 6);
   return '$ts-$tail';
+}
+
+/// Tolerant parse of a stored anchor. A single malformed row (older build,
+/// manual edit, interrupted sync) must never break the reader or the list.
+/// Results are memoised by raw JSON (anchors are immutable per row).
+final Map<String, AnnotationAnchor?> _anchorCache = {};
+
+AnnotationAnchor? tryParseAnchor(String? raw) {
+  if (raw == null || raw.isEmpty) return null;
+  if (_anchorCache.containsKey(raw)) return _anchorCache[raw];
+  AnnotationAnchor? parsed;
+  try {
+    final decoded = jsonDecode(raw);
+    if (decoded is Map) {
+      parsed = AnnotationAnchor.fromJson(decoded.cast<String, Object?>());
+    }
+  } on Object {
+    parsed = null;
+  }
+  if (_anchorCache.length > 500) _anchorCache.remove(_anchorCache.keys.first);
+  _anchorCache[raw] = parsed;
+  return parsed;
 }

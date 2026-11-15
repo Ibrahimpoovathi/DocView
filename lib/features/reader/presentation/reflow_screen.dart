@@ -154,12 +154,13 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
   Future<WebUri> _bookUrl() async {
     await installFoliateAssets();
     final port = await BookServer.ensureRunning();
+    final t = BookServer.token;
     final base = 'http://127.0.0.1:$port';
 
     final String sourceUrl;
     if (widget.debugPath != null) {
       sourceUrl =
-          '$base/files/${p.split(widget.debugPath!).last}';
+          '$base/files/${p.split(widget.debugPath!).last}?t=$t';
     } else {
       final rel = p
           .relative(widget.doc!.storedPath,
@@ -167,14 +168,15 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
           .replaceAll(r'\', '/');
       final enc = rel.split('/').map(Uri.encodeComponent).join('/');
       sourceUrl = _doc!.format == DocFormat.txt
-          ? '$base/txt/$enc'
+          ? '$base/txt/$enc?t=$t'
           : _doc!.format == DocFormat.fb2
-              ? '$base/fb2/$enc'
-              : '$base/files/$enc';
+              ? '$base/fb2/$enc?t=$t'
+              : '$base/files/$enc?t=$t';
     }
 
     final q = StringBuffer(
         '$base/foliate/docview.html?src=${Uri.encodeComponent(sourceUrl)}'
+        '&t=$t'
         '&color=${_colorMode.name}');
     if (_fraction > 0.001) {
       q.write('&frac=${_fraction.toStringAsFixed(4)}');
@@ -197,12 +199,13 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
   Future<void> _cycleColorMode() async {
     final next = ViewerColorMode
         .values[(_colorMode.index + 1) % ViewerColorMode.values.length];
-    setState(() {
-      _colorMode = next;
-      _booting = false; // keep chrome; webview reloads
-      _error = null;
-    });
-    _bookUrlFuture = null; // rebuild webview url with the new color
+    setState(() => _colorMode = next);
+    // Re-colour in place: a rebuilt WebView loses reading position and
+    // re-parses the whole book.
+    unawaited(_web?.evaluateJavascript(
+          source: "window.docviewSetColor('${next.name}')",
+        ) ??
+        Future.value());
     if (_canSave) {
       await ref
           .read(readingRepositoryProvider)
@@ -315,9 +318,7 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
     final rows = <Map<String, Object?>>[
       for (final a in _annotations)
         if (a.kind == AnnotationKind.highlight)
-          if (AnnotationAnchor.fromJson(
-                  jsonDecode(a.anchor) as Map<String, Object?>)
-              .cfi case final String cfi)
+          if (tryParseAnchor(a.anchor)?.cfi case final String cfi)
             {'value': cfi, 'color': a.color ?? 'yellow', 'uuid': a.uuid},
     ];
     if (rows.isEmpty) return;
@@ -351,9 +352,15 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
           })})') ??
       Future.value();
 
-  Future<void> _pushRemoveAnnotation(String cfi) =>
-      _web?.evaluateJavascript(
-          source: 'window.docviewRemoveAnnotation(${_jsonStr(cfi)})') ??
+  Future<void> _pushRemoveAnnotation({
+    required String cfi,
+    required String uuid,
+  }) =>
+      _web?.evaluateJavascript(source:
+          'window.docviewRemoveAnnotation(${jsonEncode({
+            'value': cfi,
+            'uuid': uuid,
+          })})') ??
       Future.value();
 
   void _dismissSelAction() {
@@ -404,10 +411,7 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
   bool _hasReflowBookmarkAt(String cfi) => _annotations.any(
         (a) =>
             a.kind == AnnotationKind.bookmark &&
-            AnnotationAnchor.fromJson(
-                    jsonDecode(a.anchor) as Map<String, Object?>)
-                .cfi ==
-                cfi,
+            tryParseAnchor(a.anchor)?.cfi == cfi,
       );
 
   Future<void> _toggleReflowBookmark() async {
@@ -417,10 +421,7 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
     final existing = _annotations
         .where((a) => a.kind == AnnotationKind.bookmark)
         .where((a) =>
-            AnnotationAnchor.fromJson(
-                    jsonDecode(a.anchor) as Map<String, Object?>)
-                .cfi ==
-            cfi)
+            tryParseAnchor(a.anchor)?.cfi == cfi)
         .firstOrNull;
     if (existing != null) {
       await ref.read(annotationsRepositoryProvider).softDelete(existing.id);
@@ -446,9 +447,7 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
         _annotations.where((a) => a.uuid == uuid).firstOrNull;
     final ann = find();
     if (ann == null || !mounted) return;
-    final anchor =
-        AnnotationAnchor.fromJson(jsonDecode(ann.anchor) as Map<String, Object?>);
-    final cfi = anchor.cfi;
+    final cfi = tryParseAnchor(ann.anchor)?.cfi;
     await showAnnotationEditor(
       context,
       ref,
@@ -458,7 +457,9 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
         _pushUpdateAnnotation(cfi: cfi, uuid: uuid, color: color);
       },
       onDeleted: () {
-        if (cfi != null) _pushRemoveAnnotation(cfi);
+        if (cfi != null) {
+          _pushRemoveAnnotation(cfi: cfi, uuid: uuid);
+        }
         if (mounted) {
           setState(() => _annotations = [
                 ..._annotations.where((a) => a.uuid != uuid),
@@ -620,9 +621,7 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
                         ref,
                         _doc!,
                         onJump: (ann) {
-                          final cfi = AnnotationAnchor.fromJson(jsonDecode(
-                                  ann.anchor) as Map<String, Object?>)
-                              .cfi;
+                          final cfi = tryParseAnchor(ann.anchor)?.cfi;
                           if (cfi != null) {
                             _web?.evaluateJavascript(
                                 source:
@@ -630,19 +629,17 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
                           }
                         },
                         onUpdateColor: (ann, color) {
-                          final cfi = AnnotationAnchor.fromJson(jsonDecode(
-                                  ann.anchor) as Map<String, Object?>)
-                              .cfi;
+                          final cfi = tryParseAnchor(ann.anchor)?.cfi;
                           if (cfi != null && color != null) {
                             _pushUpdateAnnotation(
                                 cfi: cfi, uuid: ann.uuid, color: color);
                           }
                         },
                         onDelete: (ann) {
-                          final cfi = AnnotationAnchor.fromJson(jsonDecode(
-                                  ann.anchor) as Map<String, Object?>)
-                              .cfi;
-                          if (cfi != null) _pushRemoveAnnotation(cfi);
+                          final cfi = tryParseAnchor(ann.anchor)?.cfi;
+                          if (cfi != null) {
+                            _pushRemoveAnnotation(cfi: cfi, uuid: ann.uuid);
+                          }
                         },
                       ),
             ),
@@ -701,7 +698,6 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
                       );
                     }
                     return InAppWebView(
-                      key: ValueKey(_colorMode),
                       initialUrlRequest: URLRequest(url: snap.data!),
 
                       initialSettings: InAppWebViewSettings(

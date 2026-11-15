@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Cleartext traffic is allowed only for the reader's own loopback server
+     (page/asset serving and FB2 conversion). Everything else — in particular
+     WebDAV sync — must use TLS. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+        <!-- 10.0.2.2 is the emulator's alias for the host; used only by the
+             on-device test battery, never a real endpoint. -->
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>

@@ -46,6 +46,13 @@ class FakeWebdav implements WebdavBackend {
       (throw StateError('missing remote book $remoteName'));
 
   @override
+  Future<void> downloadBook(String remoteName, File target,
+      {void Function(int, int)? onProgress}) async {
+    final bytes = await readBook(remoteName, onProgress: onProgress);
+    await target.writeAsBytes(bytes);
+  }
+
+  @override
   Future<void> writeBook(String remoteName, File localFile,
       {void Function(int, int)? onProgress}) async =>
       books[remoteName] = await localFile.readAsBytes();

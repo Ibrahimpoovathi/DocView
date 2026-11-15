@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/design/dv.dart';
 import '../../../core/design/widgets/empty_state.dart';
 import '../../../core/storage/database.dart';
+import '../../sync/presentation/sync_providers.dart';
 import 'collection_picker_sheet.dart';
 import 'edit_doc_sheet.dart';
 import 'providers.dart';
@@ -22,6 +23,9 @@ Future<void> showDocOptionsSheet(
 
   final allTags = await repo.watchTags().first;
   final tagIds = await repo.tagIdsFor(doc.id);
+  final hasLocalCopy = await File(doc.storedPath).exists();
+  final canRemoveLocal =
+      hasLocalCopy && ref.read(webdavAccountStoreProvider).value != null;
   if (!context.mounted) return;
 
   await showModalBottomSheet<void>(
@@ -89,6 +93,15 @@ Future<void> showDocOptionsSheet(
                   await _exportCopy(context, ref, doc);
                 },
               ),
+              if (canRemoveLocal)
+                DvSheetTile(
+                  icon: Icons.cloud_done_outlined,
+                  label: 'Remove local copy (keep in cloud)',
+                  onTap: () {
+                    Navigator.pop(sheetCtx);
+                    _confirmRemoveLocalCopy(sheetCtx, ref, doc, cs);
+                  },
+                ),
               DvSheetTile(
                 icon: Icons.delete_outline_rounded,
                 label: 'Delete',
@@ -169,6 +182,52 @@ Future<void> _exportCopy(
       ),
     );
   }
+}
+
+void _confirmRemoveLocalCopy(
+  BuildContext sheetCtx,
+  WidgetRef ref,
+  Document doc,
+  ColorScheme cs,
+) {
+  showDialog<void>(
+    context: sheetCtx,
+    builder: (dlgCtx) => AlertDialog(
+      title: const Text('Remove local copy?'),
+      content: Text(
+        '"${doc.title}" stays in your library. It will be downloaded again '
+        'from your WebDAV server the next time you open it.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dlgCtx).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () async {
+            Navigator.of(dlgCtx).pop();
+            try {
+              final file = File(doc.storedPath);
+              if (await file.exists()) await file.delete();
+            } on FileSystemException {
+              // Best effort — the book is still readable from the server.
+            }
+            ref.read(localCopyRevisionProvider.notifier).bump();
+            if (!sheetCtx.mounted) return;
+            ScaffoldMessenger.of(sheetCtx).showSnackBar(
+              SnackBar(
+                content: const Text(
+                    'Local copy removed — it will download again when opened.'),
+                behavior: SnackBarBehavior.floating,
+                backgroundColor: cs.inverseSurface,
+              ),
+            );
+          },
+          child: const Text('Remove'),
+        ),
+      ],
+    ),
+  );
 }
 
 void _confirmDelete(

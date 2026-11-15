@@ -71,6 +71,14 @@ abstract class WebdavBackend {
   Future<Set<String>> listCoverShas();
   Future<Uint8List> readBook(String remoteName,
       {void Function(int, int)? onProgress});
+
+  /// Downloads a book straight to [target] (streamed in production) so big
+  /// files never sit in memory.
+  Future<void> downloadBook(String remoteName, File target,
+      {void Function(int, int)? onProgress}) async {
+    final bytes = await readBook(remoteName, onProgress: onProgress);
+    await target.writeAsBytes(bytes);
+  }
   Future<void> writeBook(String remoteName, File localFile,
       {void Function(int, int)? onProgress});
   Future<Uint8List?> readCover(String sha256);
@@ -183,6 +191,25 @@ class DocviewWebdav implements WebdavBackend {
   @override
   Future<Uint8List> readBook(String remoteName, {void Function(int, int)? onProgress}) =>
       _client.read('$_booksDir/$remoteName', onProgress: onProgress);
+
+  @override
+  Future<void> downloadBook(String remoteName, File target,
+      {void Function(int, int)? onProgress}) async {
+    final resp = await _client.readStream('$_booksDir/$remoteName');
+    final total =
+        int.tryParse(resp.headers.value('content-length') ?? '') ?? -1;
+    final sink = target.openWrite();
+    var received = 0;
+    try {
+      await for (final chunk in resp.data!.stream) {
+        sink.add(chunk);
+        received += chunk.length;
+        onProgress?.call(received, total);
+      }
+    } finally {
+      await sink.close();
+    }
+  }
 
   @override
   Future<void> writeBook(String remoteName, File localFile,

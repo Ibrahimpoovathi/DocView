@@ -111,6 +111,18 @@ class ImportRunner extends _$ImportRunner {
   static const importing = 'importing';
 }
 
+/// Bumped when a local book copy is removed (or restored) outside the
+/// documents stream, so the library re-checks which books are cloud-only.
+final localCopyRevisionProvider =
+    NotifierProvider<LocalCopyRevision, int>(LocalCopyRevision.new);
+
+class LocalCopyRevision extends Notifier<int> {
+  @override
+  int build() => 0;
+
+  void bump() => state++;
+}
+
 /// Per-document reading positions (upsert store).
 @Riverpod(keepAlive: true)
 ReadingRepository readingRepository(Ref ref) =>

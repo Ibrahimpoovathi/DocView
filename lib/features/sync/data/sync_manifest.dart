@@ -6,13 +6,13 @@ import 'package:docview/core/storage/database.dart';
 /// for collections/tags) so the manifest reconciles identically on any
 /// device regardless of locally generated ids/uuids.
 class SyncManifest {
-  static const int version = 2;
+  static const int version = 3;
 
   final List<SyncDoc> documents;
   final List<SyncPosition> positions;
   final List<SyncAnnotation> annotations;
-  final List<String> collections;
-  final List<String> tags;
+  final List<SyncName> collections;
+  final List<SyncName> tags;
   final List<SyncLink> documentCollections;
   final List<SyncLink> documentTags;
   final DateTime? syncedAt;
@@ -34,8 +34,8 @@ class SyncManifest {
         'documents': documents.map((d) => d.toJson()).toList(),
         'positions': positions.map((p) => p.toJson()).toList(),
         'annotations': annotations.map((a) => a.toJson()).toList(),
-        'collections': collections,
-        'tags': tags,
+        'collections': collections.map((c) => c.toJson()).toList(),
+        'tags': tags.map((t) => t.toJson()).toList(),
         'documentCollections': documentCollections.map((l) => l.toJson()).toList(),
         'documentTags': documentTags.map((l) => l.toJson()).toList(),
       };
@@ -51,10 +51,13 @@ class SyncManifest {
     final annotations = (json['annotations'] as List<dynamic>? ?? const [])
         .map((e) => SyncAnnotation.fromJson(e as Map<String, dynamic>))
         .toList();
+    // v3 stores {name, updatedAt, deletedAt}; v1/v2 stored bare names.
     final collections = (json['collections'] as List<dynamic>? ?? const [])
-        .cast<String>()
+        .map(SyncName.fromJson)
         .toList();
-    final tags = (json['tags'] as List<dynamic>? ?? const []).cast<String>().toList();
+    final tags = (json['tags'] as List<dynamic>? ?? const [])
+        .map(SyncName.fromJson)
+        .toList();
     final docCollections = (json['documentCollections'] as List<dynamic>? ?? const [])
         .map((e) => SyncLink.fromJson(e as Map<String, dynamic>))
         .toList();
@@ -73,6 +76,44 @@ class SyncManifest {
       syncedAt: syncedAtRaw == null ? null : DateTime.tryParse(syncedAtRaw),
     );
   }
+}
+
+/// A named group (collection or tag) with its sync timestamps.
+class SyncName {
+  final String name;
+  final DateTime? updatedAt;
+
+  /// Non-null means the group was deleted locally; deletions propagate.
+  final DateTime? deletedAt;
+
+  const SyncName({
+    required this.name,
+    this.updatedAt,
+    this.deletedAt,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        if (updatedAt != null) 'updatedAt': updatedAt!.toIso8601String(),
+        if (deletedAt != null) 'deletedAt': deletedAt!.toIso8601String(),
+      };
+
+  /// Accepts both the v3 object form and the legacy bare-string form.
+  static SyncName fromJson(Object? raw) {
+    if (raw is String) return SyncName(name: raw);
+    if (raw is Map) {
+      final map = raw.cast<String, Object?>();
+      return SyncName(
+        name: (map['name'] as String?) ?? '',
+        updatedAt: DateTime.tryParse((map['updatedAt'] as String?) ?? ''),
+        deletedAt: DateTime.tryParse((map['deletedAt'] as String?) ?? ''),
+      );
+    }
+    return const SyncName(name: '');
+  }
+
+  /// The effective mutation instant used for last-writer-wins.
+  DateTime? get mutation => deletedAt ?? updatedAt;
 }
 
 /// One annotation in the manifest, keyed by uuid + document sha256.

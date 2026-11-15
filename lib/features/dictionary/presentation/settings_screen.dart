@@ -99,6 +99,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _snack('Fill in server URL, username and password.');
       return;
     }
+    final uri = Uri.tryParse(account.url);
+    final host = uri?.host ?? '';
+    final loopback =
+        host == 'localhost' || host == '127.0.0.1' || host == '::1';
+    if (uri == null || (uri.scheme != 'https' && !(uri.scheme == 'http' && loopback))) {
+      _snack('Use an https:// server URL. Plain http is only allowed for a '
+          'server running on this device.');
+      return;
+    }
     setState(() => _saving = true);
     try {
       final warning =

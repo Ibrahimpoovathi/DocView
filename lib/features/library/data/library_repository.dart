@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:drift/drift.dart';
 import 'package:path/path.dart' as p;
 
+import '../../../core/format/doc_format.dart';
 import '../../../core/paths/app_paths.dart';
 import '../../../core/storage/database.dart';
 import '../domain/library_query.dart';
@@ -137,10 +138,39 @@ class LibraryRepository {
 
   // --- Writes ---------------------------------------------------------------
 
-  Future<Document?> findBySha256(String sha256) =>
+  Future<Document?> findBySha256(String sha256, {bool includeDeleted = false}) =>
       (_db.select(_db.documents)
-            ..where((d) => d.sha256.equals(sha256) & d.deletedAt.isNull()))
+            ..where((d) => includeDeleted
+                ? d.sha256.equals(sha256)
+                : d.sha256.equals(sha256) & d.deletedAt.isNull()))
           .getSingleOrNull();
+
+  /// Restores a soft-deleted row so a re-imported file reuses it instead of
+  /// colliding with the UNIQUE(sha256) index.
+  Future<void> reviveDocument(
+    int id, {
+    required String originalName,
+    required String storedPath,
+    required int sizeBytes,
+    required DocFormat format,
+  }) async {
+    await (_db.update(_db.documents)..where((d) => d.id.equals(id)))
+        .write(DocumentsCompanion(
+      originalName: Value(originalName),
+      storedPath: Value(storedPath),
+      sizeBytes: Value(sizeBytes),
+      format: Value(format),
+      deletedAt: const Value(null),
+      updatedAt: Value(DateTime.now()),
+    ));
+    final row = await (_db.select(_db.documents)
+          ..where((d) => d.id.equals(id)))
+        .getSingleOrNull();
+    if (row != null) {
+      // deleteDocument removed the FTS row; recreate its metadata entry.
+      await _syncFtsMeta(row.id, row.title, row.author);
+    }
+  }
 
   Future<int> insertDocument(DocumentsCompanion entry) async {
     final stamped = entry.updatedAt.present
@@ -234,6 +264,24 @@ class LibraryRepository {
       [id],
     );
 
+    // Cascade: positions and group links would otherwise linger forever and
+    // resurface if the same file is re-imported.
+    await (_db.delete(_db.readingPositions)
+          ..where((r) => r.documentId.equals(id)))
+        .go();
+    await (_db.delete(_db.documentCollections)
+          ..where((dc) => dc.documentId.equals(id)))
+        .go();
+    await (_db.delete(_db.documentTags)
+          ..where((dt) => dt.documentId.equals(id)))
+        .go();
+    // Annotations are tombstoned (not deleted) so removals propagate via sync.
+    await (_db.update(_db.annotations)..where((a) => a.documentId.equals(id)))
+        .write(AnnotationsCompanion(
+      deletedAt: Value(DateTime.now()),
+      updatedAt: Value(DateTime.now()),
+    ));
+
     try {
       await AppPaths.deleteBookDir(doc.uuid);
       await AppPaths.deleteCover(doc.uuid);
@@ -251,24 +299,51 @@ class LibraryRepository {
 
   // --- Collections ----------------------------------------------------------
 
-  Stream<List<Collection>> watchCollections() =>
-      (_db.select(_db.collections)..orderBy([(c) => OrderingTerm(expression: c.name)]))
-          .watch();
+  Stream<List<Collection>> watchCollections() => (_db.select(_db.collections)
+        ..where((c) => c.deletedAt.isNull())
+        ..orderBy([(c) => OrderingTerm(expression: c.name)]))
+      .watch();
 
-  Future<int> createCollection(String name) =>
-      _db.into(_db.collections)
-          .insert(CollectionsCompanion(name: Value(name.trim())));
+  Future<int> createCollection(String name) async {
+    final trimmed = name.trim();
+    final existing = await (_db.select(_db.collections)
+          ..where((c) => c.name.equals(trimmed)))
+        .getSingleOrNull();
+    if (existing != null) {
+      if (existing.deletedAt != null) {
+        // Re-creating a deleted name revives the row (no UNIQUE violation).
+        await (_db.update(_db.collections)..where((c) => c.id.equals(existing.id)))
+            .write(CollectionsCompanion(
+          deletedAt: const Value(null),
+          updatedAt: Value(DateTime.now()),
+        ));
+      }
+      return existing.id;
+    }
+    return _db.into(_db.collections).insert(CollectionsCompanion(
+          name: Value(trimmed),
+          updatedAt: Value(DateTime.now()),
+        ));
+  }
 
   Future<void> renameCollection(int id, String name) =>
       (_db.update(_db.collections)..where((c) => c.id.equals(id)))
-          .write(CollectionsCompanion(name: Value(name.trim())));
+          .write(CollectionsCompanion(
+        name: Value(name.trim()),
+        updatedAt: Value(DateTime.now()),
+      ));
 
+  /// Soft-deletes a collection (tombstone) and drops its document links.
   Future<void> deleteCollection(int id) async {
     await _db.transaction(() async {
       await (_db.delete(_db.documentCollections)
             ..where((dc) => dc.collectionId.equals(id)))
           .go();
-      await (_db.delete(_db.collections)..where((c) => c.id.equals(id))).go();
+      await (_db.update(_db.collections)..where((c) => c.id.equals(id)))
+          .write(CollectionsCompanion(
+        deletedAt: Value(DateTime.now()),
+        updatedAt: Value(DateTime.now()),
+      ));
     });
   }
 
@@ -311,12 +386,44 @@ class LibraryRepository {
 
   // --- Tags -----------------------------------------------------------------
 
-  Stream<List<Tag>> watchTags() =>
-      (_db.select(_db.tags)..orderBy([(t) => OrderingTerm(expression: t.name)]))
-          .watch();
+  Stream<List<Tag>> watchTags() => (_db.select(_db.tags)
+        ..where((t) => t.deletedAt.isNull())
+        ..orderBy([(t) => OrderingTerm(expression: t.name)]))
+      .watch();
 
-  Future<int> createTag(String name) =>
-      _db.into(_db.tags).insert(TagsCompanion(name: Value(name.trim())));
+  Future<int> createTag(String name) async {
+    final trimmed = name.trim();
+    final existing = await (_db.select(_db.tags)
+          ..where((t) => t.name.equals(trimmed)))
+        .getSingleOrNull();
+    if (existing != null) {
+      if (existing.deletedAt != null) {
+        await (_db.update(_db.tags)..where((t) => t.id.equals(existing.id)))
+            .write(TagsCompanion(
+          deletedAt: const Value(null),
+          updatedAt: Value(DateTime.now()),
+        ));
+      }
+      return existing.id;
+    }
+    return _db.into(_db.tags).insert(TagsCompanion(
+          name: Value(trimmed),
+          updatedAt: Value(DateTime.now()),
+        ));
+  }
+
+  /// Soft-deletes a tag (tombstone) and drops its document links.
+  Future<void> deleteTag(int id) async {
+    await _db.transaction(() async {
+      await (_db.delete(_db.documentTags)..where((dt) => dt.tagId.equals(id)))
+          .go();
+      await (_db.update(_db.tags)..where((t) => t.id.equals(id)))
+          .write(TagsCompanion(
+        deletedAt: Value(DateTime.now()),
+        updatedAt: Value(DateTime.now()),
+      ));
+    });
+  }
 
   Future<void> setDocumentTags(int docId, Set<int> tagIds) =>
       _db.transaction(() async {

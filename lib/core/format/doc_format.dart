@@ -15,7 +15,7 @@ enum DocFormat {
   doc('DOC'),
   ppt('PPT'),
   odt('ODT'),
-  other('DOC');
+  other('OTHER');
 
   final String label;
   const DocFormat(this.label);

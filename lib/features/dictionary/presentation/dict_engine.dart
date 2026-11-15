@@ -63,7 +63,13 @@ class DictEngineController {
     await _web?.evaluateJavascript(
       source: 'window.dictLookup($reqId, ${jsonEncode(word)})',
     );
-    return completer.future;
+    try {
+      // A wedged engine page must never hold the lookup sheet open forever.
+      return await completer.future.timeout(const Duration(seconds: 5));
+    } on TimeoutException {
+      _pending.remove(reqId);
+      return null;
+    }
   }
 
   Completer<void>? _loading;
@@ -82,7 +88,8 @@ class DictEngineController {
       final port = await BookServer.ensureRunning();
       final base = 'http://127.0.0.1:$port';
       final url =
-          '$base/foliate/dictview.html?name=${Uri.encodeComponent(imported.id)}';
+          '$base/foliate/dictview.html?name=${Uri.encodeComponent(imported.id)}'
+          '&t=${BookServer.token}';
       await _web?.loadUrl(
         urlRequest: URLRequest(url: WebUri(url)),
       );

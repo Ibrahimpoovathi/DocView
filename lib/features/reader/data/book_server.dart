@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:path/path.dart' as p;
@@ -24,6 +26,21 @@ class BookServer {
   static HttpServer? _server;
   static int? _port;
   static Directory? _foliateDir;
+  static String? _token;
+
+  /// Per-launch secret that every request must carry (`?t=` or the
+  /// `x-docview-token` header). Other apps on the device cannot guess it, so
+  /// the local server is not readable by them.
+  static String get token {
+    var token = _token;
+    if (token != null) return token;
+    final random = Random.secure();
+    token = base64Url
+        .encode(List<int>.generate(24, (_) => random.nextInt(256)))
+        .replaceAll('=', '');
+    _token = token;
+    return token;
+  }
 
   /// Where foliate-html was installed (set by [installFoliateAssets]).
   static void useFoliateDirectory(Directory dir) => _foliateDir = dir;
@@ -32,7 +49,7 @@ class BookServer {
   static Future<int> ensureRunning() async {
     if (_server != null) return _port!;
     final server = await shelf_io.serve(
-      _buildRouter().call,
+      _guarded(_buildRouter().call),
       InternetAddress.loopbackIPv4,
       0,
       poweredByHeader: null,
@@ -46,7 +63,52 @@ class BookServer {
     final s = _server;
     _server = null;
     _port = null;
+    _token = null;
     await s?.close(force: true);
+  }
+
+  /// Rejects any request that does not present the current launch token.
+  /// Unknown-token requests look like 404s so probing yields no signal.
+  ///
+  /// The token may arrive as `?t=`, the `x-docview-token` header, or the
+  /// `dv_t` cookie. The cookie is set on the first authorised response so
+  /// ES-module imports inside docview.html (which cannot carry a query
+  /// string) authenticate automatically.
+  static Handler _guarded(Handler inner) => (Request req) async {
+        if (!_authorized(req)) return Response.notFound('not found');
+        final res = await inner(req);
+        return res.change(headers: {
+          ...res.headers,
+          'set-cookie':
+              'dv_t=$token; Path=/; HttpOnly; SameSite=Strict',
+        });
+      };
+
+  static bool _authorized(Request req) {
+    final expected = token;
+    final fromQuery = req.url.queryParameters['t'];
+    if (fromQuery != null && _tokensMatch(fromQuery, expected)) return true;
+    final fromHeader = req.headers['x-docview-token'];
+    if (fromHeader != null && _tokensMatch(fromHeader, expected)) return true;
+    final cookie = req.headers['cookie'];
+    if (cookie != null) {
+      for (final part in cookie.split(';')) {
+        final trimmed = part.trim();
+        if (trimmed.startsWith('dv_t=')) {
+          if (_tokensMatch(trimmed.substring(5), expected)) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  static bool _tokensMatch(String a, String b) {
+    if (a.length != b.length) return false;
+    var diff = 0;
+    for (var i = 0; i < a.length; i++) {
+      diff |= a.codeUnitAt(i) ^ b.codeUnitAt(i);
+    }
+    return diff == 0;
   }
 
   static Router _buildRouter() {
@@ -129,6 +191,10 @@ class BookServer {
       if (file == null || !await file.exists()) {
         return Response.notFound('not found');
       }
+      final size = await file.length();
+      if (size > maxFb2ConvertBytes) {
+        return _ok(fb2TooLargeEpub(size), 'application/epub+zip');
+      }
       final cacheKey = '${file.path}#${await file.lastModified()}';
       final cached = _convertCacheGet(cacheKey);
       if (cached != null) return _ok(cached, 'application/epub+zip');
@@ -147,6 +213,7 @@ class BookServer {
   /// Above this size plain text is refused with a friendly in-reader page
   /// instead of freezing the reader (conversion cost grows superlinearly).
   static const maxTxtConvertBytes = maxTxtConvertMb * 1024 * 1024;
+  static const maxFb2ConvertBytes = maxFb2ConvertMb * 1024 * 1024;
 
   static const _maxConvertCacheEntries = 4;
 

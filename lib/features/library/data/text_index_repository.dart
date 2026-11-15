@@ -36,17 +36,30 @@ class TextIndexRepository {
           .get();
 
       for (final doc in rows.take(batch)) {
-        final extractable = bodyIndexableFormats.contains(doc.format);
-        final body = extractable
-            ? await extractBodyText(doc.storedPath, doc.format)
-            : '';
+        // One poison document must not wedge the whole queue: quarantine it
+        // (mark indexed with no body) and continue with the rest.
+        try {
+          final extractable = bodyIndexableFormats.contains(doc.format);
+          final body = extractable
+              ? await extractBodyText(doc.storedPath, doc.format)
+              : '';
 
-        // Mark done first (drives library re-query), then upsert the row.
-        await (_db.update(_db.documents)
-              ..where((d) => d.id.equals(doc.id)))
-            .write(DocumentsCompanion(textIndexed: const Value(1)));
-        await _upsert(doc.id, doc.title, doc.author ?? '', body);
-        done++;
+          // Mark done first (drives library re-query), then upsert the row.
+          await (_db.update(_db.documents)
+                ..where((d) => d.id.equals(doc.id)))
+              .write(DocumentsCompanion(textIndexed: const Value(1)));
+          await _upsert(doc.id, doc.title, doc.author ?? '', body);
+          done++;
+        } on Object {
+          try {
+            await (_db.update(_db.documents)
+                  ..where((d) => d.id.equals(doc.id)))
+                .write(DocumentsCompanion(textIndexed: const Value(1)));
+          } on Object {
+            // If even the quarantine write fails, stop this pass.
+            break;
+          }
+        }
       }
     } on Object {
       // Best effort — indexing failures never block the app.

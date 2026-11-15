@@ -6,11 +6,14 @@ import 'package:excel_plus/excel_plus.dart' hide TextSpan;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:pdfrx/pdfrx.dart' as pdfrx;
 
 import '../../../app/router.dart';
 import '../../../core/design/dv.dart';
 import '../../../core/format/doc_format.dart';
 import '../../../core/storage/database.dart';
+import '../data/docx_pdf.dart';
+import '../data/docx_text.dart';
 import '../data/odt_text.dart';
 import '../data/pptx_text.dart';
 import '../data/rtf_text.dart';
@@ -264,6 +267,14 @@ class DocxScreen extends ConsumerStatefulWidget {
 }
 
 class _DocxScreenState extends OfficeReaderState<DocxScreen> {
+  final _pdf = pdfrx.PdfViewerController();
+  String? _pdfPath;
+  List<String>? _lines;
+  int _pageNumber = 1;
+  int _pageCount = 0;
+  int _initialPage = 1;
+  double? _pendingFraction;
+
   @override
   Document? get doc => widget.doc;
 
@@ -273,6 +284,47 @@ class _DocxScreenState extends OfficeReaderState<DocxScreen> {
     if (!file.existsSync()) {
       throw StateError('File is missing from storage');
     }
+    try {
+      _pdfPath = await DocxPdfCache.ensure(widget.doc);
+      // Paragraph text powers the search sheet; jump maps lines → pages.
+      _lines = extractDocxParagraphs(await file.readAsBytes())
+          .map((p) => p.text)
+          .toList();
+    } on Object {
+      // Oversized / unparsable: keep the previous lightweight viewer.
+      _pdfPath = null;
+    }
+  }
+
+  @override
+  List<String>? searchableLines() => _pdfPath == null ? null : _lines;
+
+  @override
+  void jumpToSearchHit(int lineIndex) {
+    final lines = _lines;
+    if (lines == null || lines.isEmpty || _pageCount == 0) return;
+    final page =
+        (1 + (lineIndex / lines.length * _pageCount).floor()).clamp(1, _pageCount);
+    _pdf.goToPage(pageNumber: page);
+  }
+
+  @override
+  void onProgressRestored(double fraction, String? location) {
+    final stored = int.tryParse(location ?? '');
+    if (stored != null) {
+      _initialPage = stored;
+    } else {
+      _pendingFraction = fraction;
+    }
+  }
+
+  @override
+  void persistProgress() {
+    if (_pageCount <= 0) return;
+    scheduleProgressSave(
+      (_pageNumber / _pageCount).clamp(0, 1).toDouble(),
+      '$_pageNumber',
+    );
   }
 
   @override
@@ -282,23 +334,64 @@ class _DocxScreenState extends OfficeReaderState<DocxScreen> {
     }
     final cs = Theme.of(context).colorScheme;
     final bg = officeSurface(cs, _colorMode);
-    // Dark preset carries light-on-dark text styles; others use light text.
-    final theme = switch (_colorMode) {
-      ViewerColorMode.dark => DocxViewTheme.dark(),
-      _ => DocxViewTheme.light(),
-    };
-    final config = DocxViewConfig(
-      enableSearch: true,
-      enableZoom: true,
-      enableSelection: true,
-      theme: theme,
-      backgroundColor: bg,
-    );
+    final pdfPath = _pdfPath;
+    if (pdfPath == null) {
+      // Fallback (oversized/legacy): the lightweight DOCX widget viewer.
+      final theme = switch (_colorMode) {
+        ViewerColorMode.dark => DocxViewTheme.dark(),
+        _ => DocxViewTheme.light(),
+      };
+      return buildOfficeScaffold(
+        body: DocxViewWithSearch(
+          file: File(widget.doc.storedPath),
+          config: DocxViewConfig(
+            enableSearch: true,
+            enableZoom: true,
+            enableSelection: true,
+            theme: theme,
+            backgroundColor: bg,
+          ),
+        ),
+      );
+    }
 
     return buildOfficeScaffold(
-      body: DocxViewWithSearch(
-        file: File(widget.doc.storedPath),
-        config: config,
+      bottomBar: _pageCount > 0
+          ? SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Text(
+                  'Page $_pageNumber of $_pageCount',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            )
+          : null,
+      body: pdfrx.PdfViewer.file(
+        pdfPath,
+        controller: _pdf,
+        initialPageNumber: _initialPage,
+        params: pdfrx.PdfViewerParams(
+          backgroundColor: bg,
+          onDocumentChanged: (document) {
+            final count = document?.pages.length ?? 0;
+            if (!mounted) return;
+            setState(() {
+              _pageCount = count;
+              final pending = _pendingFraction;
+              if (pending != null && count > 0) {
+                _pendingFraction = null;
+                _initialPage = (pending * count).round().clamp(1, count);
+              }
+            });
+          },
+          onPageChanged: (number) {
+            if (number == null || number == _pageNumber) return;
+            setState(() => _pageNumber = number);
+          },
+        ),
       ),
     );
   }
@@ -412,42 +505,65 @@ class _XlsxScreenState extends OfficeReaderState<XlsxScreen> {
           color: officeText(cs, _colorMode),
         );
 
-    TableRow tableRow(List<String> cells, {bool headerRow = false}) {
+    // Fixed per-column widths from a sample (IntrinsicColumnWidth on a
+    // 3000-row Table measured every cell — a multi-second layout jank).
+    final widths = List<double>.generate(columnCount, (c) {
+      var maxLen = 4;
+      for (final row in rows.take(40)) {
+        if (c < row.length && row[c].length > maxLen) maxLen = row[c].length;
+      }
+      return (maxLen * 7.5).clamp(90.0, 340.0);
+    });
+    final totalWidth = widths.fold<double>(0, (a, b) => a + b);
+    final borderColor = cs.outlineVariant.withValues(alpha: 0.45);
+
+    Widget cellRow(List<String> cells, {bool headerRow = false}) {
       final style = cellStyle(headerRow);
-      return TableRow(
-        decoration: headerRow
-            ? BoxDecoration(
-                color:
-                    cs.surfaceContainerHighest.withValues(alpha: 0.55),
-              )
+      return Container(
+        color: headerRow
+            ? cs.surfaceContainerHighest.withValues(alpha: 0.55)
             : null,
-        children: [
-          for (var c = 0; c < columnCount; c++)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              child: Text(
-                c < cells.length ? cells[c] : '',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: style,
+        child: Row(
+          children: [
+            for (var c = 0; c < columnCount; c++)
+              Container(
+                width: widths[c],
+                decoration: BoxDecoration(
+                  border: BoxBorder.fromLTRB(
+                    right: BorderSide(color: borderColor, width: 0.6),
+                    bottom: BorderSide(color: borderColor, width: 0.6),
+                  ),
+                ),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                child: Text(
+                  c < cells.length ? cells[c] : '',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: style,
+                ),
               ),
-            ),
-        ],
+          ],
+        ),
       );
     }
 
-    Widget table = Table(
-      columnWidths: {
-        for (var c = 0; c < columnCount; c++) c: const IntrinsicColumnWidth(),
-      },
-      border: TableBorder.all(
-        color: cs.outlineVariant.withValues(alpha: 0.45),
-        width: 0.6,
+    // Virtualised: only visible rows are laid out (a 3000-row Table built
+    // every cell on every frame).
+    final headerOffset = header.isEmpty ? 0 : 1;
+    final table = SizedBox(
+      width: totalWidth,
+      child: ListView.builder(
+        controller: _scroll,
+        itemCount: dataRows.length + headerOffset,
+        itemExtent: 46,
+        itemBuilder: (_, i) {
+          if (headerOffset == 1 && i == 0) {
+            return cellRow(header, headerRow: true);
+          }
+          return cellRow(dataRows[i - headerOffset]);
+        },
       ),
-      children: [
-        if (header.isNotEmpty) tableRow(header, headerRow: true),
-        for (final row in dataRows) tableRow(row),
-      ],
     );
 
     Widget body = Column(
@@ -473,13 +589,15 @@ class _XlsxScreenState extends OfficeReaderState<XlsxScreen> {
             ),
           ),
         Expanded(
-          child: SingleChildScrollView(
-            controller: _scroll,
-            child: SingleChildScrollView(
+          child: LayoutBuilder(
+            builder: (context, constraints) => SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Padding(
                 padding: const EdgeInsets.all(8),
-                child: table,
+                child: SizedBox(
+                  height: constraints.maxHeight - 16,
+                  child: table,
+                ),
               ),
             ),
           ),

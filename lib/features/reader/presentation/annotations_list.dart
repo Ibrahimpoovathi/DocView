@@ -187,10 +187,9 @@ class _AnnotationsListSheet extends ConsumerWidget {
   }
 
   String _titleOf(Annotation a) {
-    final anchor = AnnotationAnchor.fromJson(
-        jsonDecode(a.anchor) as Map<String, Object?>);
-    final where = anchor.page != null
-        ? 'Page ${anchor.page}'
+    final anchor = tryParseAnchor(a.anchor);
+    final where = anchor?.page != null
+        ? 'Page ${anchor!.page}'
         : a.kind == AnnotationKind.bookmark
             ? 'Bookmark'
             : 'Highlight';
@@ -219,9 +218,9 @@ class _AnnotationsListSheet extends ConsumerWidget {
       if (subset.isEmpty) continue;
       buf.writeln('## $label\n');
       for (final a in subset) {
-        final anchor = AnnotationAnchor.fromJson(
-            jsonDecode(a.anchor) as Map<String, Object?>);
-        final loc = anchor.page != null ? ' (page ${anchor.page})' : '';
+        final anchor = tryParseAnchor(a.anchor);
+        final loc =
+            anchor?.page != null ? ' (page ${anchor!.page})' : '';
         if (a.excerpt != null && a.excerpt!.trim().isNotEmpty) {
           buf.writeln('- "${a.excerpt!.trim()}"$loc');
         } else {

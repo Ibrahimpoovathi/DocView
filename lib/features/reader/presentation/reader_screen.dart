@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -249,8 +248,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     final paint = Paint();
     for (final a in _annotations) {
       if (a.kind != AnnotationKind.highlight) continue;
-      final anchor = AnnotationAnchor.fromJson(
-          jsonDecode(a.anchor) as Map<String, Object?>);
+      final anchor = tryParseAnchor(a.anchor);
+      if (anchor == null) continue;
       if (anchor.page != page.pageNumber ||
           anchor.start == null ||
           anchor.end == null) {
@@ -315,10 +314,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   bool _hasBookmarkOn(int page) => _annotations.any(
         (a) =>
             a.kind == AnnotationKind.bookmark &&
-            AnnotationAnchor.fromJson(
-                    jsonDecode(a.anchor) as Map<String, Object?>)
-                .page ==
-                page,
+            tryParseAnchor(a.anchor)?.page == page,
       );
 
   Future<void> _togglePdfBookmark() async {
@@ -327,10 +323,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     final existing = _annotations
         .where((a) => a.kind == AnnotationKind.bookmark)
         .where((a) =>
-            AnnotationAnchor.fromJson(
-                    jsonDecode(a.anchor) as Map<String, Object?>)
-                .page ==
-            _pageNumber)
+            tryParseAnchor(a.anchor)?.page == _pageNumber)
         .firstOrNull;
     if (existing != null) {
       await ref
@@ -466,9 +459,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                 ref,
                 _doc!,
                 onJump: (ann) {
-                  final anchor = AnnotationAnchor.fromJson(
-                      jsonDecode(ann.anchor) as Map<String, Object?>);
-                  final page = anchor.page ?? _pageNumber;
+                  final anchor = tryParseAnchor(ann.anchor);
+                  final page = anchor?.page ?? _pageNumber;
                   _ctl.goToPage(pageNumber: page);
                 },
                 // Edits made from the sheet must repaint the PDF overlay:

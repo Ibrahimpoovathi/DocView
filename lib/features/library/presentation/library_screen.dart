@@ -21,6 +21,7 @@ import '../../../core/design/widgets/doc_card.dart';
 import '../../../core/design/widgets/empty_state.dart';
 import '../../../core/design/widgets/shelf_bar.dart';
 import '../../../core/design/widgets/skeleton.dart';
+import '../../../core/platform/open_with.dart';
 import '../../../core/storage/database.dart';
 import '../domain/library_query.dart';
 import '../data/import_service.dart';
@@ -40,15 +41,18 @@ class LibraryScreen extends ConsumerStatefulWidget {
 class _LibraryScreenState extends ConsumerState<LibraryScreen> {
   final _searchCtrl = TextEditingController();
   bool _searchOpen = false;
+  StreamSubscription<OpenWithFile>? _openWithSub;
 
   // Cloud-only doc ids (file missing). Computed once per docs-list emission —
   // never synchronously inside build — so large libraries stay jank-free.
   List<Document>? _checkedDocs;
+  int _checkedRevision = -1;
   Set<int> _cloudOnly = const <int>{};
 
-  void _scheduleCloudCheck(List<Document> docs) {
-    if (identical(docs, _checkedDocs)) return;
+  void _scheduleCloudCheck(List<Document> docs, int revision) {
+    if (identical(docs, _checkedDocs) && revision == _checkedRevision) return;
     _checkedDocs = docs;
+    _checkedRevision = revision;
     unawaited(_computeCloudOnly(docs));
   }
 
@@ -68,6 +72,8 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
   void initState() {
     super.initState();
     unawaited(ref.read(textIndexRepositoryProvider).runPending());
+    unawaited(OpenWith.instance.start());
+    _openWithSub = OpenWith.instance.files.listen(_openSharedFile);
     if (batteryHook) {
       if (batteryEdgeUrl.isNotEmpty) {
         // Edge battery: download the edge files over HTTP instead of the
@@ -449,8 +455,41 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
 
   @override
   void dispose() {
+    _openWithSub?.cancel();
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  /// Imports a file handed over by another app, then opens it.
+  Future<void> _openSharedFile(OpenWithFile shared) async {
+    String? error;
+    try {
+      final doc =
+          await ref.read(importServiceProvider).importDocument(shared.path);
+      if (doc == null) {
+        error = 'Could not open "${shared.name}" — unsupported or unreadable.';
+      } else {
+        unawaited(ref.read(textIndexRepositoryProvider).runPending());
+        ref.read(libraryRepositoryProvider).markOpened(doc.id);
+        if (mounted) context.push('/reader/${doc.id}');
+      }
+    } on Object catch (e) {
+      error = 'Could not open "${shared.name}": $e';
+    } finally {
+      if (shared.temporary) {
+        try {
+          final copy = File(shared.path);
+          if (await copy.exists()) await copy.delete();
+        } on FileSystemException {
+          // Cache cleanup is best-effort.
+        }
+      }
+    }
+    if (error != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error), behavior: SnackBarBehavior.floating),
+      );
+    }
   }
 
   Future<void> _import({bool asFolder = false}) async {
@@ -478,7 +517,18 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
       );
     }
     if (!mounted || paths.isEmpty) return;
-    final message = await ref.read(importRunnerProvider.notifier).run(paths);
+    late final String? message;
+    try {
+      message = await ref.read(importRunnerProvider.notifier).run(paths);
+    } finally {
+      // The picker caches picked files in its own temp dir; the library keeps
+      // its own copies, so those temporary duplicates are pure waste.
+      try {
+        await fp.FilePicker.clearTemporaryFiles();
+      } on Object {
+        // Best effort: some platforms/versions don't implement this.
+      }
+    }
     if (!mounted) return;
     if (message != null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -587,10 +637,11 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
 
     final docsAsync = ref.watch(libraryDocsProvider);
     final shelfAsync = ref.watch(continueReadingProvider);
+    final copyRevision = ref.watch(localCopyRevisionProvider);
 
     final body = docsAsync.when(
       data: (docs) {
-        _scheduleCloudCheck(docs);
+        _scheduleCloudCheck(docs, copyRevision);
         final shelf = shelfAsync.value ?? const <Document>[];
 
         if (docs.isEmpty && prefs.search.isEmpty) {

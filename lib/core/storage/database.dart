@@ -50,6 +50,10 @@ class Collections extends Table {
   IntColumn get id => integer().autoIncrement()();
   TextColumn get name => text().unique()();
   DateTimeColumn get createdAt => dateTime().clientDefault(() => DateTime.now())();
+  DateTimeColumn get updatedAt => dateTime().nullable()();
+
+  /// Soft-delete tombstone so removals reach other devices via sync.
+  DateTimeColumn get deletedAt => dateTime().nullable()();
 }
 
 class DocumentCollections extends Table {
@@ -64,6 +68,10 @@ class Tags extends Table {
   IntColumn get id => integer().autoIncrement()();
   TextColumn get name => text().unique()();
   DateTimeColumn get createdAt => dateTime().clientDefault(() => DateTime.now())();
+  DateTimeColumn get updatedAt => dateTime().nullable()();
+
+  /// Soft-delete tombstone so removals reach other devices via sync.
+  DateTimeColumn get deletedAt => dateTime().nullable()();
 }
 
 class DocumentTags extends Table {
@@ -146,7 +154,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase(super.e);
 
   @override
-  int get schemaVersion => 6;
+  int get schemaVersion => 7;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -190,6 +198,13 @@ class AppDatabase extends _$AppDatabase {
           }
           if (from < 6) {
             await m.createTable(annotations);
+          }
+          if (from < 7) {
+            // Collection/tag tombstones (manifest v3): deletions now propagate.
+            await addColumnIfMissing(collections, collections.updatedAt);
+            await addColumnIfMissing(collections, collections.deletedAt);
+            await addColumnIfMissing(tags, tags.updatedAt);
+            await addColumnIfMissing(tags, tags.deletedAt);
           }
         },
       );

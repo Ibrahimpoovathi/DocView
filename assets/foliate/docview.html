@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <title>DocView</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' data: blob:; frame-src blob: data:; worker-src blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
 <style>
   html, body {
     margin: 0; padding: 0; height: 100%;
@@ -80,12 +81,23 @@ const pageCSS = () => `
     pre { white-space: pre-wrap !important; }
 `
 
-const THEME_VIS =
-  colorMode === 'dark'
+const themeFor = mode =>
+  mode === 'dark'
     ? { bg: '#241f1a', fg: '#e6ddcf', filter: 'saturate(0.85)' }
-    : colorMode === 'sepia'
+    : mode === 'sepia'
       ? { bg: '#f4ebd8', fg: '#40342a', filter: 'sepia(0.28) saturate(0.9)' }
       : { bg: '#ffffff', fg: '#201a15', filter: 'none' }
+
+let THEME_VIS = themeFor(colorMode)
+
+// Live theme switch: recolours the current page without reloading the book
+// (a reload used to lose the WebView scroll/render position).
+window.docviewSetColor = mode => {
+  THEME_VIS = themeFor(mode)
+  document.documentElement.style.background = THEME_VIS.bg
+  document.body.style.background = THEME_VIS.bg
+  view.renderer?.setStyles?.(pageCSS())
+}
 
 const open = async () => {
   const book = await makeBook(src)
@@ -96,8 +108,38 @@ const open = async () => {
   // we replay this section's annotations into it. draw-annotation asks us to
   // actually paint (Overlayer.highlight with a CSS color at .3 opacity).
   // show-annotation fires when the user taps a drawn highlight.
+  // Keyed by uuid (two highlights may share a CFI) with a value index for
+  // foliate's tap events, which only report the CFI value.
   const annotationsByIndex = new Map()
-  const annotationsByValue = new Map()
+  const annotationsByValue = new Map()   // value -> [a]
+  const annotationsByUuid = new Map()    // uuid -> a
+
+  const forget = a => {
+    if (!a) return
+    if (a.uuid) annotationsByUuid.delete(a.uuid)
+    const sameValue = annotationsByValue.get(a.value)
+    if (sameValue) {
+      const i = sameValue.indexOf(a)
+      if (i >= 0) sameValue.splice(i, 1)
+      if (sameValue.length === 0) annotationsByValue.delete(a.value)
+    }
+    const list = annotationsByIndex.get(a.index)
+    if (list) {
+      const i = list.indexOf(a)
+      if (i >= 0) list.splice(i, 1)
+    }
+  }
+
+  const remember = a => {
+    if (a.uuid) annotationsByUuid.set(a.uuid, a)
+    const sameValue = annotationsByValue.get(a.value)
+    if (sameValue) sameValue.push(a)
+    else annotationsByValue.set(a.value, [a])
+    const i = a.index
+    const cur = annotationsByIndex.get(i)
+    if (cur) cur.push(a)
+    else if (i != null) annotationsByIndex.set(i, [a])
+  }
 
   view.addEventListener('create-overlay', ({ detail }) => {
     const { index } = detail
@@ -110,20 +152,17 @@ const open = async () => {
   })
   view.addEventListener('show-annotation', ({ detail }) => {
     const { value } = detail
-    const a = annotationsByValue.get(value)
+    const candidates = annotationsByValue.get(value) ?? []
     notify('onReflowAnnotationTap', {
-      uuid: a?.uuid ?? null,
+      uuid: candidates[0]?.uuid ?? null,
       value,
     })
   })
 
   window.docviewSetAnnotations = list => {
     for (const a of list) {
-      annotationsByValue.set(a.value, a)
-      const i = a.index
-      const cur = annotationsByIndex.get(i)
-      if (cur) cur.push(a)
-      else annotationsByIndex.set(i, [a])
+      if (!a.index && a.index !== 0) continue
+      remember(a)
     }
     // Sections already rendered (the first one) need a manual pass.
     for (const { index } of view.renderer?.getContents?.() ?? []) {
@@ -136,43 +175,34 @@ const open = async () => {
     const a = { value, color, note, uuid }
     const res = await view.addAnnotation(a)
     a.index = res?.index
-    annotationsByValue.set(value, a)
-    const i = a.index
-    const cur = annotationsByIndex.get(i)
-    if (cur) cur.push(a)
-    else if (i != null) annotationsByIndex.set(i, [a])
+    remember(a)
   }
 
-  window.docviewRemoveAnnotation = async value => {
-    const a = annotationsByValue.get(value)
+  window.docviewRemoveAnnotation = async arg => {
+    const { value, uuid } =
+      typeof arg === 'string' ? { value: arg } : arg
+    const a = (uuid && annotationsByUuid.get(uuid)) ||
+      (annotationsByValue.get(value) ?? [])[0]
     if (!a) return
     await view.addAnnotation(a, true)
-    annotationsByValue.delete(value)
-    const list = annotationsByIndex.get(a.index)
-    if (list) {
-      const i = list.indexOf(a)
-      if (i >= 0) list.splice(i, 1)
-    }
+    forget(a)
   }
 
   // Re-color in place: remove the old draw and add the updated annotation
   // (same CFI value, new color) — overlays redraw via draw-annotation.
   window.docviewUpdateAnnotation = async ({ value, color, note, uuid }) => {
-    const old = annotationsByValue.get(value)
+    const old = (uuid && annotationsByUuid.get(uuid)) ||
+      (annotationsByValue.get(value) ?? [])[0]
     if (old) await view.addAnnotation(old, true)
     const a = { value, color, note, uuid }
     const res = await view.addAnnotation(a)
     a.index = res?.index
-    annotationsByValue.set(value, a)
-    const list = annotationsByIndex.get(a.index)
-    if (list) {
-      const i = list.indexOf(old)
-      if (i >= 0) list[i] = a
-    }
+    if (old) forget(old)
+    remember(a)
   }
 
   window.docviewShowAnnotation = value =>
-    view.showAnnotation(annotationsByValue.get(value) ?? { value })
+    view.showAnnotation((annotationsByValue.get(value) ?? [])[0] ?? { value })
 
   // Collapse the native text selection after an annotation action.
   window.docviewClearSelection = () => {

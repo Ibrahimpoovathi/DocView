@@ -5,14 +5,21 @@ import 'package:archive/archive.dart';
 
 /// Minimal one-page EPUB shown when a text file exceeds the conversion size
 /// cap — renders as a normal reader page instead of an error banner.
-Uint8List txtTooLargeEpub(int sizeBytes) {
+Uint8List txtTooLargeEpub(int sizeBytes) =>
+    _tooLargeEpub(sizeBytes, 'text', maxTxtConvertMb);
+
+/// Same friendly page for oversized FB2 books.
+Uint8List fb2TooLargeEpub(int sizeBytes) =>
+    _tooLargeEpub(sizeBytes, 'FB2', maxFb2ConvertMb);
+
+Uint8List _tooLargeEpub(int sizeBytes, String kind, int capMb) {
   final mb = (sizeBytes / (1024 * 1024)).toStringAsFixed(0);
   final page = '''<?xml version="1.0" encoding="UTF-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head><meta charset="utf-8"/><link rel="stylesheet" type="text/css" href="style.css"/></head>
 <body>
-<p>This text file is $mb MB. DocView opens text files up to
-$maxTxtConvertMb MB so the reader stays fast.</p>
+<p>This $kind file is $mb MB. DocView opens $kind files up to
+$capMb MB so the reader stays fast.</p>
 </body>
 </html>''';
   final archive = Archive()
@@ -27,6 +34,9 @@ $maxTxtConvertMb MB so the reader stays fast.</p>
 
 /// Cap in MB for on-the-fly txt→EPUB conversion (shared with book_server).
 const maxTxtConvertMb = 15;
+
+/// Cap in MB for on-the-fly fb2→EPUB conversion (shared with book_server).
+const maxFb2ConvertMb = 15;
 
 const _containerXml = '''<?xml version="1.0" encoding="UTF-8"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">

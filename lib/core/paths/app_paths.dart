@@ -42,6 +42,11 @@ abstract final class AppPaths {
   static String coverFilePath(String uuid) =>
       p.join(coversDir.path, '$uuid.jpg');
 
+  /// Cached PDF rendering of a DOCX (see DocxPdfCache). Lives beside the
+  /// source so deleting the book removes it too.
+  static String docxPdfPath(String uuid) =>
+      p.join(booksDir.path, uuid, 'docview-converted.pdf');
+
   /// Removes the whole book directory for a document (called on delete).
   static Future<void> deleteBookDir(String uuid) async {
     final dir = Directory(p.join(booksDir.path, uuid));
