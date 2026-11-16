@@ -40,13 +40,17 @@ class MetadataService {
       Uint8List? cover;
       final page = pageCount > 0 ? doc.pages.first : null;
       if (page != null) {
+        // Render straight to cover resolution: at 2× page size a large or
+        // high-DPI page allocates tens of MB only to be downscaled to 480 px.
+        const maxCoverPx = 480.0;
+        final scale = maxCoverPx / page.width;
         final image = await page.render(
-          fullWidth: page.width * 2,
-          fullHeight: page.height * 2,
+          fullWidth: (page.width * scale).roundToDouble(),
+          fullHeight: (page.height * scale).roundToDouble(),
         );
         if (image != null) {
           final prepped =
-              image.createImageNF(pixelSizeThreshold: 480);
+              image.createImageNF(pixelSizeThreshold: maxCoverPx.toInt());
           image.dispose();
           cover = Uint8List.fromList(encodeJpg(prepped, quality: 84));
         }

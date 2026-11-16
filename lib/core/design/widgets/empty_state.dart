@@ -11,6 +11,7 @@ class EmptyState extends StatelessWidget {
     required this.body,
     this.actionLabel,
     this.onAction,
+    this.actionIcon = Icons.file_open_rounded,
   });
 
   final IconData icon;
@@ -18,6 +19,9 @@ class EmptyState extends StatelessWidget {
   final String body;
   final String? actionLabel;
   final VoidCallback? onAction;
+
+  /// Leading icon for the action button (e.g. back arrow for "Back").
+  final IconData actionIcon;
 
   @override
   Widget build(BuildContext context) {
@@ -58,7 +62,7 @@ class EmptyState extends StatelessWidget {
               const SizedBox(height: Dv.sp24),
               FilledButton.icon(
                 onPressed: onAction,
-                icon: const Icon(Icons.file_open_rounded),
+                icon: Icon(actionIcon),
                 label: Text(actionLabel!),
               ),
             ],

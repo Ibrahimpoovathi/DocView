@@ -902,3 +902,47 @@ host mount; previously verified in Stage D).
 **Release**: 1.0.2+12, `releases/DocView.apk` rebuilt from
 `app-arm64-v8a-release.apk` (34.7 MB), signed with the new DocView
 keystore (CN=DocView), battery defines absent (strings check: 0 hits).
+
+---
+
+## 2026-11-16 · 1.0.3 — Error-free & bloat-free pass (Phases 1–5)
+
+**What was done**
+
+- **Lifecycle leaks (1.1/1.2)**: `_pdfPasswordProvider` always disposes its
+  controller; `BookServer` is now ref-counted (`acquire`/`release`), dedupes
+  concurrent `serve` calls (`_starting`), and exposes `resetAfterCrash()`.
+  Reflow holds a ref for its lifetime and resets the server on
+  `onRenderProcessGone`; the dictionary sheet acquires/releases around its
+  live WebView.
+- **SharedPreferences (1.3)**: single `sharedPreferencesProvider`
+  (override in `main`), `LibraryPrefs` hydrates synchronously from it and
+  persists grid/sort/chip; settings, dictionary, sync providers read the same
+  instance instead of awaiting `getInstance` ad hoc.
+- **Undo delete without data loss (1.4)**: delete now tombstones and keeps
+  artifacts; a 6 s Undo snackbar revives (textIndexed reset) or purges on
+  timeout; boot sweep `purgeAbandonedArtifacts()` clears leftovers;
+  annotation tombstones only when not already deleted.
+- **Consistent back affordance (1.5)** + covers rendered at 480 px (2.1),
+  PDF text LRU touch (2.2), batched imports of 4 with same-batch claim set
+  and unique-constraint arbitration (2.3), staggered list limited to the
+  first 20 rows (2.5).
+- **Battery seeder extraction (3.1)**: ~360 lines moved out of
+  `library_screen.dart` into `library/data/battery_seeder.dart`; the battery
+  build also seeds a "Battery set" collection for chip testing.
+- **Library UX (4.1–4.3)**: collection filter chips (session-only
+  `collectionId` on prefs/query; exists-subquery in drift and SQL FTS paths;
+  mutually exclusive with All/Bookmarks/Recent); the end drawer became a
+  modal tools sheet; imports report `ImportProgress{done,total}` and show a
+  thin linear bar under the chips.
+- **Immersive PDF reading (4.4)**: tapping the page toggles the bar chrome
+  (`AnimatedSize`, PDF viewer only; reflow untouched).
+- **Tests (5.1/5.2)**: `fts_match_query_test.dart` (8 cases) and
+  `import_service_test.dart` (4 cases incl. same-batch duplicates).
+- Dropped 3.2/3.3/2.4 after review: `docx_creator` is a production
+  dependency (DOCX→PDF), the annotation mixin rewrite is high-risk/low-value,
+  and the static indexer guard is already correct.
+
+**Verification**: `flutter analyze` clean; `flutter test` 91/91 green.
+
+**Release**: 1.0.3+13, arm64 `releases/DocView.apk` rebuilt signed.

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart' as fp;
@@ -250,11 +251,40 @@ void _confirmDelete(
         ),
         FilledButton(
           style: FilledButton.styleFrom(backgroundColor: cs.error),
-          onPressed: () {
+          onPressed: () async {
             Navigator.of(dlgCtx).pop();
-            ref
-                .read(libraryRepositoryProvider)
-                .deleteDocument(doc.id);
+            final repo = ref.read(libraryRepositoryProvider);
+            final messenger = ScaffoldMessenger.of(sheetCtx);
+            // Keep files/positions until the snackbar closes so Undo restores
+            // a fully working document (not a row pointing at deleted files).
+            await repo.deleteDocument(doc.id, keepArtifacts: true);
+            if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
+            final controller = messenger.showSnackBar(
+              SnackBar(
+                content: Text('Removed "${doc.title}"'),
+                behavior: SnackBarBehavior.floating,
+                duration: const Duration(seconds: 6),
+                action: SnackBarAction(
+                  label: 'Undo',
+                  onPressed: () {
+                    unawaited(repo.reviveDocument(
+                      doc.id,
+                      originalName: doc.originalName,
+                      storedPath: doc.storedPath,
+                      sizeBytes: doc.sizeBytes,
+                      format: doc.format,
+                    ).then((_) {
+                      unawaited(
+                          ref.read(textIndexRepositoryProvider).runPending());
+                    }));
+                  },
+                ),
+              ),
+            );
+            final reason = await controller.closed;
+            if (reason != SnackBarClosedReason.action) {
+              await repo.purgeDocumentArtifacts(doc.id);
+            }
           },
           child: Text('Delete', style: TextStyle(color: cs.onError)),
         ),

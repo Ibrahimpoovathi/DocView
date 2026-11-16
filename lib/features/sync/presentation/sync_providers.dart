@@ -1,5 +1,5 @@
 import 'package:riverpod_annotation/riverpod_annotation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../../../core/storage/prefs.dart';
 
 import '../../library/presentation/providers.dart';
 import '../data/sync_engine.dart';
@@ -72,7 +72,7 @@ class SyncRunner extends _$SyncRunner {
       if (!message.startsWith('Sync failed')) {
         // Success marker for the "Last synced" indicator (best effort).
         try {
-          final prefs = await SharedPreferences.getInstance();
+          final prefs = ref.read(sharedPreferencesProvider);
           await prefs.setInt(
               'docview.lastSyncAt', DateTime.now().millisecondsSinceEpoch);
         } on Object {

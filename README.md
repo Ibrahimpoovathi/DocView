@@ -94,7 +94,7 @@ cd ~/Applications/OpenCode/DocView
 
 ## Release APK (single artifact, rewritten every update)
 
-- Deliverable: **`releases/DocView.apk`** — arm64-only release build (v1.0.2+12 ≈ 34.7 MB),
+- Deliverable: **`releases/DocView.apk`** — arm64-only release build (v1.0.3+13),
   committed to git; regenerated and *overwritten* at the end of every change.
 - Command to reproduce: `~/flutter/bin/flutter build apk --release --split-per-abi`,
   then copy `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` → `releases/DocView.apk`.
@@ -102,9 +102,9 @@ cd ~/Applications/OpenCode/DocView
   (`app-x86_64-release.apk`) — never committed.
 - Version bumps: pubspec `version` + worklog note each update.
 
-### Test results at current build (1.0.2+12)
+### Test results at current build (1.0.3+13)
 
-Static: `flutter analyze` — 0 issues; `flutter test` — 79/79 pass
+Static: `flutter analyze` — 0 issues; `flutter test` — 91/91 pass
 (format detection, repository CRUD + soft delete + reflow saveProgress,
 import pipeline incl. dedupe-by-sha256, TXT→EPUB converter,
 PPTX/ODT/RTF extractors, empty-library widget test, FTS5 metadata/body
@@ -116,7 +116,8 @@ in-memory fake WebDAV, annotation repository CRUD + remote upsert LWW
 (deletion-dominant ties) + annotation sync merge both directions,
 DOCX→PDF conversion/page geometry/caching, re-import revival of
 soft-deleted rows, collection/tag tombstone revive, legacy manifest
-parsing, cp1251 FB2 decoding, BookServer token rejection).
+parsing, cp1251 FB2 decoding, BookServer token rejection, FTS query
+escaping, batched import dedupe).
 
 AVD battery (install, cold launch, screenshot review, FATAL/ANR logcat scan;
 run via `tool/battery_all.sh` → per-AVD `tool/battery_one.sh <avd>`):

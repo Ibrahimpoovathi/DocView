@@ -29,20 +29,20 @@ final docByIdProvider = FutureProvider.family<Document?, int>(
 
 /// ColorFilter applied to rendered page bitmaps only (overlays stay clean).
 ColorFilter? _filterFor(ViewerColorMode mode) => switch (mode) {
-      ViewerColorMode.normal => null,
-      ViewerColorMode.dark => ColorFilter.matrix(const [
-          -1, 0, 0, 0, 255, //
-          0, -1, 0, 0, 255, //
-          0, 0, -1, 0, 255, //
-          0, 0, 0, 1, 0,
-        ]),
-      ViewerColorMode.sepia => ColorFilter.matrix(const [
-          0.393, 0.769, 0.189, 0, 0, //
-          0.349, 0.686, 0.168, 0, 0, //
-          0.272, 0.534, 0.131, 0, 0, //
-          0, 0, 0, 1, 0,
-        ]),
-    };
+  ViewerColorMode.normal => null,
+  ViewerColorMode.dark => ColorFilter.matrix(const [
+    -1, 0, 0, 0, 255, //
+    0, -1, 0, 0, 255, //
+    0, 0, -1, 0, 255, //
+    0, 0, 0, 1, 0,
+  ]),
+  ViewerColorMode.sepia => ColorFilter.matrix(const [
+    0.393, 0.769, 0.189, 0, 0, //
+    0.349, 0.686, 0.168, 0, 0, //
+    0.272, 0.534, 0.131, 0, 0, //
+    0, 0, 0, 1, 0,
+  ]),
+};
 
 class ReaderScreen extends ConsumerStatefulWidget {
   const ReaderScreen({super.key, required this.docId, this.debugPath});
@@ -73,6 +73,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   int _pageCount = 1;
   bool _booting = true;
   bool _searchOpen = false;
+
+  /// Immersive reading: a tap on the page hides the top/bottom bars (PDF only).
+  bool _barsVisible = true;
   ViewerColorMode _colorMode = ViewerColorMode.normal;
 
   final _searchCtrl = TextEditingController();
@@ -123,8 +126,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     final pos = await ref.read(readingRepositoryProvider).ensure(doc.id);
     if (!mounted) return;
     if (doc.format == DocFormat.pdf) {
-      _annotations =
-          await ref.read(annotationsRepositoryProvider).listForDoc(doc.id);
+      _annotations = await ref
+          .read(annotationsRepositoryProvider)
+          .listForDoc(doc.id);
     }
     if (!mounted) return;
     setState(() {
@@ -174,37 +178,41 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     _passwordAttempts++;
     if (!mounted) return null;
     final ctrl = TextEditingController();
-    final password = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogCtx) => AlertDialog(
-        title: Text(
-          _passwordAttempts > 1 ? 'Incorrect password' : 'Password required',
+    try {
+      final password = await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogCtx) => AlertDialog(
+          title: Text(
+            _passwordAttempts > 1 ? 'Incorrect password' : 'Password required',
+          ),
+          content: TextField(
+            controller: ctrl,
+            obscureText: true,
+            autofocus: true,
+            decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+              labelText: 'Document password',
+            ),
+            onSubmitted: (v) => Navigator.pop(dialogCtx, v),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogCtx, ctrl.text),
+              child: const Text('Unlock'),
+            ),
+          ],
         ),
-        content: TextField(
-          controller: ctrl,
-          obscureText: true,
-          autofocus: true,
-          decoration: const InputDecoration(
-            border: OutlineInputBorder(),
-            labelText: 'Document password',
-          ),
-          onSubmitted: (v) => Navigator.pop(dialogCtx, v),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogCtx),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogCtx, ctrl.text),
-            child: const Text('Unlock'),
-          ),
-        ],
-      ),
-    );
-    if (password == null || password.isEmpty) return null;
-    return password;
+      );
+      if (password == null || password.isEmpty) return null;
+      return password;
+    } finally {
+      ctrl.dispose();
+    }
   }
 
   // --- annotations -------------------------------------------------------------
@@ -217,13 +225,22 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   final _pdfTextPending = <int>{};
 
   Future<void> _ensurePdfText(int pageNumber) async {
-    if (_pdfTextCache.containsKey(pageNumber)) return;
+    // Touch on hit so Dart's insertion-ordered map behaves as an LRU: the
+    // page under the viewport is re-inserted as most-recent.
+    final cached = _pdfTextCache.remove(pageNumber);
+    if (cached != null) {
+      _pdfTextCache[pageNumber] = cached;
+      return;
+    }
     if (!_pdfTextPending.add(pageNumber)) return;
     try {
-      _pdfTextCache[pageNumber] =
-          await _ctl.document.pages[pageNumber - 1].loadStructuredText();
-      // Bounded cache: text pages are only needed for visible annotations.
-      if (_pdfTextCache.length > 64) _pdfTextCache.clear();
+      _pdfTextCache[pageNumber] = await _ctl.document.pages[pageNumber - 1]
+          .loadStructuredText();
+      // Evict one entry at a time instead of clearing everything: a visible
+      // highlight must not lose its text because an off-screen page loaded.
+      while (_pdfTextCache.length > 64) {
+        _pdfTextCache.remove(_pdfTextCache.keys.first);
+      }
     } on Object {
       // Best effort: annotations on unreadable pages simply don't paint.
     } finally {
@@ -255,8 +272,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
           anchor.end == null) {
         continue;
       }
-      paint.color =
-          annotationColorOf(a.color ?? 'yellow').withValues(alpha: 0.35);
+      paint.color = annotationColorOf(a.color ?? 'yellow')
+          .withValues(alpha: 0.35);
       final charRects = pageText.charRects;
       final end = anchor.end!.clamp(0, charRects.length);
       var start = anchor.start!.clamp(0, charRects.length);
@@ -292,7 +309,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     final doc = _doc;
     if (doc == null || ranges.isEmpty) return;
     final first = ranges.first;
-    final ann = await ref.read(annotationsRepositoryProvider).create(
+    final ann = await ref
+        .read(annotationsRepositoryProvider)
+        .create(
           doc.id,
           kind: kind,
           anchor: AnnotationAnchor(
@@ -312,31 +331,34 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   }
 
   bool _hasBookmarkOn(int page) => _annotations.any(
-        (a) =>
-            a.kind == AnnotationKind.bookmark &&
-            tryParseAnchor(a.anchor)?.page == page,
-      );
+    (a) =>
+        a.kind == AnnotationKind.bookmark &&
+        tryParseAnchor(a.anchor)?.page == page,
+  );
+
+  void _toggleBars() {
+    if (_searchOpen) return;
+    setState(() => _barsVisible = !_barsVisible);
+  }
 
   Future<void> _togglePdfBookmark() async {
     final doc = _doc;
     if (doc == null) return;
     final existing = _annotations
         .where((a) => a.kind == AnnotationKind.bookmark)
-        .where((a) =>
-            tryParseAnchor(a.anchor)?.page == _pageNumber)
+        .where((a) => tryParseAnchor(a.anchor)?.page == _pageNumber)
         .firstOrNull;
     if (existing != null) {
-      await ref
-          .read(annotationsRepositoryProvider)
-          .softDelete(existing.id);
+      await ref.read(annotationsRepositoryProvider).softDelete(existing.id);
       if (!mounted) return;
       setState(() {
-        _annotations =
-            _annotations.where((a) => a.id != existing.id).toList();
+        _annotations = _annotations.where((a) => a.id != existing.id).toList();
       });
       return;
     }
-    final ann = await ref.read(annotationsRepositoryProvider).create(
+    final ann = await ref
+        .read(annotationsRepositoryProvider)
+        .create(
           doc.id,
           kind: AnnotationKind.bookmark,
           anchor: AnnotationAnchor(page: _pageNumber),
@@ -369,11 +391,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
 
     // Debug path: run the viewer straight from the file, no library row.
     if (widget.debugPath != null) {
-      return _buildViewer(
-        title: 'Debug PDF',
-        cs: cs,
-        path: widget.debugPath!,
-      );
+      return _buildViewer(title: 'Debug PDF', cs: cs, path: widget.debugPath!);
     }
 
     if (_doc == null) {
@@ -383,6 +401,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
           heading: 'Not found',
           body: 'This document is no longer in your library.',
           actionLabel: 'Back',
+          actionIcon: Icons.arrow_back_rounded,
           onAction: () => context.pop(),
         ),
       );
@@ -409,10 +428,12 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
             child: EmptyState(
               icon: Icons.auto_stories_rounded,
               heading: '"${doc.title}"',
-              body: 'Legacy Word/PowerPoint files aren\'t supported in this '
+              body:
+                  'Legacy Word/PowerPoint files aren\'t supported in this '
                   'build. Open the file once in Word, PowerPoint, or '
                   'LibreOffice and re-save it as .docx/.pptx to read it here.',
               actionLabel: 'Back',
+              actionIcon: Icons.arrow_back_rounded,
               onAction: () => context.pop(),
             ),
           );
@@ -425,6 +446,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
           heading: '"${doc.title}"',
           body: 'This format is not supported yet.',
           actionLabel: 'Back',
+          actionIcon: Icons.arrow_back_rounded,
           onAction: () => context.pop(),
         ),
       );
@@ -440,64 +462,78 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   }) {
     return Scaffold(
       backgroundColor: cs.surface,
-      appBar: AppBar(
-        title: Text(
-          title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
-        backgroundColor: cs.surface,
-        surfaceTintColor: Colors.transparent,
-        actions: [
-          if (_canSave)
-            IconButton(
-              icon: const Icon(Icons.format_list_bulleted_rounded),
-              tooltip: 'Annotations',
-              onPressed: () => showAnnotationsList(
-                context,
-                ref,
-                _doc!,
-                onJump: (ann) {
-                  final anchor = tryParseAnchor(ann.anchor);
-                  final page = anchor?.page ?? _pageNumber;
-                  _ctl.goToPage(pageNumber: page);
-                },
-                // Edits made from the sheet must repaint the PDF overlay:
-                // _annotations is a snapshot, so reload it after each change.
-                onUpdateColor: (ann, color) async {
-                  final list = await ref
-                      .read(annotationsRepositoryProvider)
-                      .listForDoc(_doc!.id);
-                  if (!mounted) return;
-                  setState(() => _annotations = list);
-                },
-                onDelete: (ann) async {
-                  final list = await ref
-                      .read(annotationsRepositoryProvider)
-                      .listForDoc(_doc!.id);
-                  if (!mounted) return;
-                  setState(() => _annotations = list);
-                },
-              ),
-            ),
-          if (_canSave)
-            IconButton(
-              icon: Icon(
-                _hasBookmarkOn(_pageNumber)
-                    ? Icons.bookmark_rounded
-                    : Icons.bookmark_border_rounded,
-                color: _hasBookmarkOn(_pageNumber) ? cs.primary : null,
-              ),
-              tooltip: _hasBookmarkOn(_pageNumber)
-                  ? 'Remove bookmark'
-                  : 'Bookmark this page',
-              onPressed: _togglePdfBookmark,
-            ),
-        ],
-      ),
       body: Column(
         children: [
+          AnimatedSize(
+            duration: Dv.settle,
+            curve: Dv.settleCurve,
+            alignment: Alignment.topCenter,
+            child: _barsVisible
+                ? SizedBox(
+                    width: double.infinity,
+                    child: AppBar(
+                      title: Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      backgroundColor: cs.surface,
+                      surfaceTintColor: Colors.transparent,
+                      actions: [
+                        if (_canSave)
+                          IconButton(
+                            icon: const Icon(
+                              Icons.format_list_bulleted_rounded,
+                            ),
+                            tooltip: 'Annotations',
+                            onPressed: () => showAnnotationsList(
+                              context,
+                              ref,
+                              _doc!,
+                              onJump: (ann) {
+                                final anchor = tryParseAnchor(ann.anchor);
+                                final page = anchor?.page ?? _pageNumber;
+                                _ctl.goToPage(pageNumber: page);
+                              },
+                              // Edits made from the sheet must repaint the PDF overlay:
+                              // _annotations is a snapshot, so reload it after each change.
+                              onUpdateColor: (ann, color) async {
+                                final list = await ref
+                                    .read(annotationsRepositoryProvider)
+                                    .listForDoc(_doc!.id);
+                                if (!mounted) return;
+                                setState(() => _annotations = list);
+                              },
+                              onDelete: (ann) async {
+                                final list = await ref
+                                    .read(annotationsRepositoryProvider)
+                                    .listForDoc(_doc!.id);
+                                if (!mounted) return;
+                                setState(() => _annotations = list);
+                              },
+                            ),
+                          ),
+                        if (_canSave)
+                          IconButton(
+                            icon: Icon(
+                              _hasBookmarkOn(_pageNumber)
+                                  ? Icons.bookmark_rounded
+                                  : Icons.bookmark_border_rounded,
+                              color: _hasBookmarkOn(_pageNumber)
+                                  ? cs.primary
+                                  : null,
+                            ),
+                            tooltip: _hasBookmarkOn(_pageNumber)
+                                ? 'Remove bookmark'
+                                : 'Bookmark this page',
+                            onPressed: _togglePdfBookmark,
+                          ),
+                      ],
+                    ),
+                  )
+                : const SizedBox(width: double.infinity),
+          ),
           if (_searchOpen && _searcher != null)
             AnimatedBuilder(
               animation: _searcher!,
@@ -528,138 +564,156 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
               },
             ),
           Expanded(
-            child: pdfrx.PdfViewer.file(
-              path,
-              controller: _ctl,
-              initialPageNumber: _initialPage ?? 1,
-              passwordProvider: _pdfPasswordProvider,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _toggleBars,
+              child: pdfrx.PdfViewer.file(
+                path,
+                controller: _ctl,
+                initialPageNumber: _initialPage ?? 1,
+                passwordProvider: _pdfPasswordProvider,
                 params: pdfrx.PdfViewerParams(
-                backgroundColor: _colorMode == ViewerColorMode.dark
-                    ? const Color(0xFF211D19)
-                    : cs.surfaceContainerHighest.withValues(alpha: 0.75),
-                errorBannerBuilder: (context, error, stackTrace, documentRef) {
-                  // Corrupt/unsupported PDFs showed a raw stack-trace banner;
-                  // give a friendly full-screen message with a way out.
-                  return EmptyState(
-                    icon: Icons.picture_as_pdf_outlined,
-                    heading: 'Could not open this PDF',
-                    body: 'The file appears to be damaged, password-protected '
-                        'beyond repair, or not a real PDF.',
-                    actionLabel: 'Back',
-                    onAction: () => context.pop(),
-                  );
-                },
-                pageImageColorFilter: _filterFor(_colorMode),
-                pagePaintCallbacks: [
-                  ?_searcher?.pageTextMatchPaintCallback,
-                  _paintPdfHighlights,
-                ],
-                matchTextColor: Colors.white.withValues(alpha: 0.6),
-                activeMatchTextColor: Colors.white,
-                onPageChanged: (number) {
-                  if (number == null || number == _pageNumber) return;
-                  setState(() {
-                    _pageNumber = number;
-                  });
-                  _scheduleSave();
-                },
-                onViewerReady: (document, _) {
-                  setState(() {
-                    _pageCount = document.pages.length;
-                    _searcher ??= pdfrx.PdfTextSearcher(_ctl);
-                  });
-                  if (batteryHook &&
-                      batterySearchTerm.isNotEmpty &&
-                      !_batterySearchStarted) {
-                    _batterySearchStarted = true;
-                    _searchCtrl.text = batterySearchTerm;
-                    _searcher!
-                        .startTextSearch(batterySearchTerm, caseInsensitive: true);
-                  }
-                  if (batteryHook && batteryDictWord.isNotEmpty) {
-                    Future.delayed(const Duration(milliseconds: 800), () {
-                      if (mounted) {
-                        showDictionarySheet(context, ref, batteryDictWord);
-                      }
+                  backgroundColor: _colorMode == ViewerColorMode.dark
+                      ? const Color(0xFF211D19)
+                      : cs.surfaceContainerHighest.withValues(alpha: 0.75),
+                  errorBannerBuilder: (context, error, stackTrace, documentRef) {
+                    // Corrupt/unsupported PDFs showed a raw stack-trace banner;
+                    // give a friendly full-screen message with a way out.
+                    return EmptyState(
+                      icon: Icons.picture_as_pdf_outlined,
+                      heading: 'Could not open this PDF',
+                      body:
+                          'The file appears to be damaged, password-protected '
+                          'beyond repair, or not a real PDF.',
+                      actionLabel: 'Back',
+                      actionIcon: Icons.arrow_back_rounded,
+                      onAction: () => context.pop(),
+                    );
+                  },
+                  pageImageColorFilter: _filterFor(_colorMode),
+                  pagePaintCallbacks: [
+                    ?_searcher?.pageTextMatchPaintCallback,
+                    _paintPdfHighlights,
+                  ],
+                  matchTextColor: Colors.white.withValues(alpha: 0.6),
+                  activeMatchTextColor: Colors.white,
+                  onPageChanged: (number) {
+                    if (number == null || number == _pageNumber) return;
+                    setState(() {
+                      _pageNumber = number;
                     });
-                  }
-                },
-                textSelectionParams: const pdfrx.PdfTextSelectionParams(
-                  showContextMenuAutomatically: true,
-                ),
-                customizeContextMenuItems: (params, items) {
-                  if (!params.textSelectionDelegate.hasSelectedText) return;
-                  items.insert(
-                    0,
-                    ContextMenuButtonItem(
-                      label: 'Dictionary',
-                      onPressed: () async {
-                        final text =
-                            await params.textSelectionDelegate.getSelectedText();
-                        await params.textSelectionDelegate.clearTextSelection();
-                        params.dismissContextMenu();
-                        if (!mounted) return;
-                        await showDictionarySheet(context, ref, text);
-                      },
-                    ),
-                  );
-                  items.insert(
-                    1,
-                    ContextMenuButtonItem(
-                      label: 'Highlight',
-                      onPressed: () async {
-                        final ranges = await params.textSelectionDelegate
-                            .getSelectedTextRanges();
-                        params.dismissContextMenu();
-                        if (!mounted || ranges.isEmpty) return;
-                        final color = await showHighlightColorPicker(context);
-                        if (color == null) return;
-                        await params.textSelectionDelegate.clearTextSelection();
-                        await _createPdfAnnotation(
-                          AnnotationKind.highlight,
-                          ranges: ranges,
-                          color: color,
-                        );
-                      },
-                    ),
-                  );
-                  items.insert(
-                    2,
-                    ContextMenuButtonItem(
-                      label: 'Add note',
-                      onPressed: () async {
-                        final ranges = await params.textSelectionDelegate
-                            .getSelectedTextRanges();
-                        params.dismissContextMenu();
-                        if (!mounted || ranges.isEmpty) return;
-                        final note = await promptNoteText(context);
-                        if (note == null || note.isEmpty) {
+                    _scheduleSave();
+                  },
+                  onViewerReady: (document, _) {
+                    setState(() {
+                      _pageCount = document.pages.length;
+                      _searcher ??= pdfrx.PdfTextSearcher(_ctl);
+                    });
+                    if (batteryHook &&
+                        batterySearchTerm.isNotEmpty &&
+                        !_batterySearchStarted) {
+                      _batterySearchStarted = true;
+                      _searchCtrl.text = batterySearchTerm;
+                      _searcher!.startTextSearch(
+                        batterySearchTerm,
+                        caseInsensitive: true,
+                      );
+                    }
+                    if (batteryHook && batteryDictWord.isNotEmpty) {
+                      Future.delayed(const Duration(milliseconds: 800), () {
+                        if (mounted) {
+                          showDictionarySheet(context, ref, batteryDictWord);
+                        }
+                      });
+                    }
+                  },
+                  textSelectionParams: const pdfrx.PdfTextSelectionParams(
+                    showContextMenuAutomatically: true,
+                  ),
+                  customizeContextMenuItems: (params, items) {
+                    if (!params.textSelectionDelegate.hasSelectedText) return;
+                    items.insert(
+                      0,
+                      ContextMenuButtonItem(
+                        label: 'Dictionary',
+                        onPressed: () async {
+                          final text = await params.textSelectionDelegate
+                              .getSelectedText();
                           await params.textSelectionDelegate
                               .clearTextSelection();
-                          return;
-                        }
-                        await params.textSelectionDelegate.clearTextSelection();
-                        await _createPdfAnnotation(
-                          AnnotationKind.note,
-                          ranges: ranges,
-                          note: note,
-                        );
-                      },
-                    ),
-                  );
-                },
+                          params.dismissContextMenu();
+                          if (!mounted) return;
+                          await showDictionarySheet(context, ref, text);
+                        },
+                      ),
+                    );
+                    items.insert(
+                      1,
+                      ContextMenuButtonItem(
+                        label: 'Highlight',
+                        onPressed: () async {
+                          final ranges = await params.textSelectionDelegate
+                              .getSelectedTextRanges();
+                          params.dismissContextMenu();
+                          if (!mounted || ranges.isEmpty) return;
+                          final color = await showHighlightColorPicker(context);
+                          if (color == null) return;
+                          await params.textSelectionDelegate
+                              .clearTextSelection();
+                          await _createPdfAnnotation(
+                            AnnotationKind.highlight,
+                            ranges: ranges,
+                            color: color,
+                          );
+                        },
+                      ),
+                    );
+                    items.insert(
+                      2,
+                      ContextMenuButtonItem(
+                        label: 'Add note',
+                        onPressed: () async {
+                          final ranges = await params.textSelectionDelegate
+                              .getSelectedTextRanges();
+                          params.dismissContextMenu();
+                          if (!mounted || ranges.isEmpty) return;
+                          final note = await promptNoteText(context);
+                          if (note == null || note.isEmpty) {
+                            await params.textSelectionDelegate
+                                .clearTextSelection();
+                            return;
+                          }
+                          await params.textSelectionDelegate
+                              .clearTextSelection();
+                          await _createPdfAnnotation(
+                            AnnotationKind.note,
+                            ranges: ranges,
+                            note: note,
+                          );
+                        },
+                      ),
+                    );
+                  },
+                ),
               ),
             ),
           ),
-          _BottomBar(
-            current: _pageNumber,
-            total: _pageCount,
-            cs: cs,
-            onPage: (v) => _ctl.goToPage(pageNumber: v),
-            colorMode: _colorMode,
-            onColorCycle: _cycleColorMode,
-            onSearchOpen: () => setState(() => _searchOpen = true),
-            onOutline: _showOutline,
+          AnimatedSize(
+            duration: Dv.settle,
+            curve: Dv.settleCurve,
+            alignment: Alignment.bottomCenter,
+            child: _barsVisible
+                ? _BottomBar(
+                    current: _pageNumber,
+                    total: _pageCount,
+                    cs: cs,
+                    onPage: (v) => _ctl.goToPage(pageNumber: v),
+                    colorMode: _colorMode,
+                    onColorCycle: _cycleColorMode,
+                    onSearchOpen: () => setState(() => _searchOpen = true),
+                    onOutline: _showOutline,
+                  )
+                : const SizedBox(width: double.infinity),
           ),
         ],
       ),
@@ -671,10 +725,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
         .values[(_colorMode.index + 1) % ViewerColorMode.values.length];
     setState(() => _colorMode = next);
     if (_canSave) {
-      await ref.read(readingRepositoryProvider).savePrefs(
-            _doc!.id,
-            colorMode: next,
-          );
+      await ref
+          .read(readingRepositoryProvider)
+          .savePrefs(_doc!.id, colorMode: next);
     }
   }
 
@@ -728,8 +781,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
             final e = entries[i];
             final dest = e.node.dest;
             return ListTile(
-              contentPadding:
-                  EdgeInsets.only(left: Dv.sp20 + (e.depth * Dv.sp16)),
+              contentPadding: EdgeInsets.only(
+                left: Dv.sp20 + (e.depth * Dv.sp16),
+              ),
               title: Text(e.node.title, maxLines: 2),
               onTap: () {
                 Navigator.pop(sheetCtx);
@@ -767,7 +821,6 @@ class _ReaderScaffold extends StatelessWidget {
     );
   }
 }
-
 
 class _BottomBar extends StatelessWidget {
   const _BottomBar({
@@ -828,8 +881,9 @@ class _BottomBar extends StatelessWidget {
               child: SliderTheme(
                 data: SliderTheme.of(context).copyWith(
                   trackHeight: 3,
-                  thumbShape:
-                      const RoundSliderThumbShape(enabledThumbRadius: 8),
+                  thumbShape: const RoundSliderThumbShape(
+                    enabledThumbRadius: 8,
+                  ),
                   overlayShape: SliderComponentShape.noOverlay,
                 ),
                 child: Slider(

@@ -204,7 +204,7 @@ final class SyncRunnerProvider extends $NotifierProvider<SyncRunner, String> {
   }
 }
 
-String _$syncRunnerHash() => r'5b06d78eb25f97531bb8144d1cd0eb5635361780';
+String _$syncRunnerHash() => r'7de88f965abfe545e6e90677690c43c72f8cfd51';
 
 /// Runs a sync cycle; state holds the last result/feedback line ('' while
 /// idle). Library screen surfaces it as a snackbar via ref.listen.

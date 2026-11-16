@@ -1,7 +1,7 @@
 import 'package:file_picker/file_picker.dart' as fp;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../../../core/storage/prefs.dart';
 
 import '../../../core/design/dv.dart';
 import '../../sync/data/webdav_sync.dart';
@@ -36,7 +36,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _refresh() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = ref.read(sharedPreferencesProvider);
     if (!mounted) return;
     setState(() {
       _dicts = DictRegistry(prefs).list();
@@ -53,7 +53,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         type: fp.FileType.any,
       );
       if (paths.isEmpty) return;
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = ref.read(sharedPreferencesProvider);
       final imported = await DictRegistry(prefs).import(paths: paths);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -75,13 +75,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _remove(ImportedDict dict) async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = ref.read(sharedPreferencesProvider);
     await DictRegistry(prefs).remove(dict.id);
     await _refresh();
   }
 
   Future<void> _toggleOnline(bool value) async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = ref.read(sharedPreferencesProvider);
     await prefs.setBool('docview.onlineDictionary', value);
     if (mounted) setState(() => _onlineEnabled = value);
   }
@@ -129,7 +129,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   Future<int?> _lastSyncAt() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = ref.read(sharedPreferencesProvider);
       return prefs.getInt('docview.lastSyncAt');
     } on Object {
       return null;

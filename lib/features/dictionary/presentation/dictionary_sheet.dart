@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../../../core/storage/prefs.dart';
 
 import '../../../core/design/dv.dart';
 import '../data/dictionary_service.dart';
+import '../../reader/data/book_server.dart';
 import '../data/dict_registry.dart';
 import 'dict_engine.dart';
 import 'providers.dart';
@@ -73,16 +76,30 @@ class _DictionarySheet extends ConsumerStatefulWidget {
 class _DictionarySheetState extends ConsumerState<_DictionarySheet> {
   final _engine = DictEngineController();
   late Future<_LookupOutcome> _future;
+  bool _serverAcquired = false;
 
   @override
   void initState() {
     super.initState();
+    // The offline engine loads dictview.html (and its dictionary files) from
+    // the loopback server, so hold a reference for the whole sheet lifetime.
+    _serverAcquired = true;
+    unawaited(BookServer.acquire().catchError((Object _) => 0));
     _future = _lookup();
+  }
+
+  @override
+  void dispose() {
+    if (_serverAcquired) {
+      _serverAcquired = false;
+      unawaited(BookServer.release());
+    }
+    super.dispose();
   }
 
   Future<_LookupOutcome> _lookup() async {
     // Offline first (user-imported StarDict), then online fallback.
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = ref.read(sharedPreferencesProvider);
     final dicts = DictRegistry(prefs).list();
     String? offlineText;
     String? offlineSource;
@@ -107,8 +124,7 @@ class _DictionarySheetState extends ConsumerState<_DictionarySheet> {
     }
     if (onlineEntry != null && onlineEntry.meanings.isNotEmpty) {
       // Record even "not found" attempts? No — only real hits make history.
-      final history = await ref.read(lookupHistoryProvider.future);
-      await history.record(widget.word);
+      await ref.read(lookupHistoryProvider).record(widget.word);
     }
     return _LookupOutcome(
       offlineText: offlineText,

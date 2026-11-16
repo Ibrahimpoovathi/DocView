@@ -57,6 +57,8 @@ class ReflowScreen extends ConsumerStatefulWidget {
 
 class _ReflowScreenState extends ConsumerState<ReflowScreen>
     with WidgetsBindingObserver {
+  bool _serverAcquired = false;
+
   InAppWebViewController? _web;
 
   Future<WebUri>? _bookUrlFuture;
@@ -114,7 +116,10 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
     _searchDebounce?.cancel();
     _dictDebounce?.cancel();
     _searchCtrl.dispose();
-    unawaited(BookServer.stop());
+    if (_serverAcquired) {
+      _serverAcquired = false;
+      unawaited(BookServer.release());
+    }
     super.dispose();
   }
 
@@ -153,7 +158,8 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
 
   Future<WebUri> _bookUrl() async {
     await installFoliateAssets();
-    final port = await BookServer.ensureRunning();
+    final port = await BookServer.acquire();
+    _serverAcquired = true;
     final t = BookServer.token;
     final base = 'http://127.0.0.1:$port';
 
@@ -694,6 +700,7 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
                         heading: 'Could not open',
                         body: _error!,
                         actionLabel: 'Back',
+          actionIcon: Icons.arrow_back_rounded,
                         onAction: () => context.pop(),
                       );
                     }
@@ -714,6 +721,7 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
                             'The document viewer crashed while rendering. '
                             'Reopening may help.');
                         _web = null;
+                        unawaited(BookServer.resetAfterCrash());
                       },
                       onWebViewCreated: (c) {
                         _web = c;

@@ -38,19 +38,33 @@ class ImportService {
   final LibraryRepository _repo;
   final MetadataService _meta;
 
-  Future<ImportSummary> importSources(List<String> sourcePaths) async {
+  Future<ImportSummary> importSources(
+    List<String> sourcePaths, {
+    void Function(int done, int total)? onProgress,
+  }) async {
     var added = 0, duplicates = 0, failed = 0;
 
-    for (final path in sourcePaths) {
-      final result = await _importSingle(path);
-      switch (result.status) {
-        case _ImportStatus.added:
-          added++;
-        case _ImportStatus.duplicate:
-          duplicates++;
-        case _ImportStatus.failed:
-          failed++;
+    // Hashing + file copies are I/O bound; four at a time keeps the disk busy
+    // without starving the UI isolate or opening too many file handles.
+    const batchSize = 4;
+    final total = sourcePaths.length;
+    for (var i = 0; i < total; i += batchSize) {
+      final end = (i + batchSize).clamp(0, total);
+      final claimed = <String>{};
+      final results = await Future.wait(
+        sourcePaths.sublist(i, end).map((p) => _importSingle(p, claimed: claimed)),
+      );
+      for (final result in results) {
+        switch (result.status) {
+          case _ImportStatus.added:
+            added++;
+          case _ImportStatus.duplicate:
+            duplicates++;
+          case _ImportStatus.failed:
+            failed++;
+        }
       }
+      onProgress?.call(end, total);
     }
     return ImportSummary(added: added, duplicates: duplicates, failed: failed);
   }
@@ -60,7 +74,9 @@ class ImportService {
   Future<Document?> importDocument(String path) async =>
       (await _importSingle(path)).doc;
 
-  Future<_ImportResult> _importSingle(String path) async {
+  /// [claimed] dedupes identical files picked in the same batch: without it
+  /// both workers pass the pre-insert lookup and one hits UNIQUE(sha256).
+  Future<_ImportResult> _importSingle(String path, {Set<String>? claimed}) async {
     try {
       final file = File(path);
       if (!await file.exists()) return const _ImportResult.failed();
@@ -74,6 +90,10 @@ class ImportService {
       // seconds; the digest is pure compute, so run it off-thread.
       final hash = await Isolate.run(
           () => sha256.convert(File(path).readAsBytesSync()).toString());
+      if (claimed != null && !claimed.add(hash)) {
+        // Another file in this batch owns the hash; its row appears shortly.
+        return const _ImportResult.duplicate(null);
+      }
       final existing = await _repo.findBySha256(hash);
       if (existing != null) return _ImportResult.duplicate(existing);
 
@@ -104,15 +124,24 @@ class ImportService {
       await Directory(p.dirname(storedPath)).create(recursive: true);
       await file.copy(storedPath);
 
-      final id = await _repo.insertDocument(DocumentsCompanion.insert(
-        uuid: uuid,
-        format: format,
-        originalName: name,
-        title: p.basenameWithoutExtension(name),
-        storedPath: storedPath,
-        sizeBytes: size,
-        sha256: hash,
-      ));
+      final int id;
+      try {
+        id = await _repo.insertDocument(DocumentsCompanion.insert(
+          uuid: uuid,
+          format: format,
+          originalName: name,
+          title: p.basenameWithoutExtension(name),
+          storedPath: storedPath,
+          sizeBytes: size,
+          sha256: hash,
+        ));
+      } on Object {
+        // Belt and braces for a same-hash race we could not see in [claimed]
+        // (e.g. a concurrent import from the share sheet).
+        final row = await _repo.findBySha256(hash);
+        if (row != null) return _ImportResult.duplicate(row);
+        rethrow;
+      }
 
       unawaited(_enrich(id, format, storedPath));
       return _ImportResult.added(await _repo.byId(id));

@@ -24,9 +24,18 @@ class BookServer {
   BookServer._();
 
   static HttpServer? _server;
-  static int? _port;
   static Directory? _foliateDir;
   static String? _token;
+
+  /// Users that must stay served (reflow readers/python? none). The server is
+  /// shared by every reflow screen plus the dictionary sheet; the two-pane
+  /// layout can mount two readers at once, so a plain stop() from one of them
+  /// used to kill the other's page loads.
+  static int _refCount = 0;
+
+  /// Dedupes concurrent starts (two screens mounting in the same frame would
+  /// otherwise bind two sockets and leak the first one).
+  static Future<int>? _starting;
 
   /// Per-launch secret that every request must carry (`?t=` or the
   /// `x-docview-token` header). Other apps on the device cannot guess it, so
@@ -46,8 +55,24 @@ class BookServer {
   static void useFoliateDirectory(Directory dir) => _foliateDir = dir;
 
   /// Starts (or returns an already-running) server; returns its port.
+  ///
+  /// Does not affect the ref count: use [acquire]/[release] for screens that
+  /// need the server alive beyond a single request.
   static Future<int> ensureRunning() async {
-    if (_server != null) return _port!;
+    final running = _server;
+    if (running != null) return running.port;
+    final starting = _starting;
+    if (starting != null) return starting;
+    final future = _start();
+    _starting = future;
+    try {
+      return await future;
+    } finally {
+      _starting = null;
+    }
+  }
+
+  static Future<int> _start() async {
     final server = await shelf_io.serve(
       _guarded(_buildRouter().call),
       InternetAddress.loopbackIPv4,
@@ -55,14 +80,38 @@ class BookServer {
       poweredByHeader: null,
     );
     _server = server;
-    _port = server.port;
     return server.port;
+  }
+
+  /// Marks a long-lived consumer (reflow screen, dictionary sheet) as using
+  /// the server. Balanced by [release].
+  static Future<int> acquire() async {
+    _refCount++;
+    try {
+      return await ensureRunning();
+    } on Object {
+      if (_refCount > 0) _refCount--;
+      rethrow;
+    }
+  }
+
+  /// Drops one consumer; the server shuts down with the last one.
+  static Future<void> release() async {
+    if (_refCount > 0) _refCount--;
+    if (_refCount == 0) await stop();
+  }
+
+  /// Renderer crash recovery: forget every consumer and restart from scratch
+  /// on the next acquire.
+  static Future<void> resetAfterCrash() async {
+    _refCount = 0;
+    _starting = null;
+    await stop();
   }
 
   static Future<void> stop() async {
     final s = _server;
     _server = null;
-    _port = null;
     _token = null;
     await s?.close(force: true);
   }

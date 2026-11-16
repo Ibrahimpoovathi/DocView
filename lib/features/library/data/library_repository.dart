@@ -38,13 +38,21 @@ class LibraryRepository {
       final plainQuery = q.search.trim().toUpperCase();
 
       Expression<bool> notDeleted() => t.deletedAt.isNull();
+      final collectionId = q.collectionId;
+      final inCollection = collectionId == null
+          ? const Constant(true)
+          : existsQuery(_db.select(_db.documentCollections)
+            ..where((dc) =>
+                dc.collectionId.equals(collectionId) &
+                dc.documentId.equalsExp(t.id)));
       final whereExpr = switch (q.chip) {
-        LibraryChip.all => notDeleted(),
-        LibraryChip.favourites =>
-          notDeleted() & t.isFavourite.equals(true),
-        LibraryChip.recent =>
-          notDeleted() & t.lastOpenedAt.isNotNull(),
-      };
+            LibraryChip.all => notDeleted(),
+            LibraryChip.favourites =>
+              notDeleted() & t.isFavourite.equals(true),
+            LibraryChip.recent =>
+              notDeleted() & t.lastOpenedAt.isNotNull(),
+          } &
+          inCollection;
 
       final query = _db.select(t)
         ..where((d) => whereExpr)
@@ -70,14 +78,21 @@ class LibraryRepository {
       LibraryChip.favourites => ' AND d.is_favourite = 1',
       LibraryChip.recent => ' AND d.last_opened_at IS NOT NULL',
     };
+    final collectionId = q.collectionId;
+    final collectionSql = collectionId == null
+        ? ''
+        : ' AND EXISTS (SELECT 1 FROM document_collections dc '
+            'WHERE dc.document_id = d.id '
+            'AND dc.collection_id = $collectionId)';
     return _db
         .customSelect(
           'SELECT d.* FROM documents d '
           'JOIN document_fts f ON f.rowid = d.id '
-          "WHERE d.deleted_at IS NULL$chipSql AND document_fts MATCH ? "
+          "WHERE d.deleted_at IS NULL$chipSql$collectionSql "
+          'AND document_fts MATCH ? '
           'ORDER BY bm25(document_fts)',
           variables: [Variable.withString(term)],
-          readsFrom: {_db.documents},
+          readsFrom: {_db.documents, _db.documentCollections},
         )
         .watch()
         // mapFromRow is Future-based; map() on the table info is the sync
@@ -136,6 +151,11 @@ class LibraryRepository {
       (_db.select(_db.documents)..where((d) => d.id.equals(id) & d.deletedAt.isNull()))
           .getSingleOrNull();
 
+  /// Includes soft-deleted rows (undo purge needs their file paths).
+  Future<Document?> byIdAny(int id) =>
+      (_db.select(_db.documents)..where((d) => d.id.equals(id)))
+          .getSingleOrNull();
+
   // --- Writes ---------------------------------------------------------------
 
   Future<Document?> findBySha256(String sha256, {bool includeDeleted = false}) =>
@@ -162,12 +182,14 @@ class LibraryRepository {
       format: Value(format),
       deletedAt: const Value(null),
       updatedAt: Value(DateTime.now()),
+      // Deletion dropped the FTS body; mark it for re-extraction.
+      textIndexed: const Value(0),
     ));
     final row = await (_db.select(_db.documents)
           ..where((d) => d.id.equals(id)))
         .getSingleOrNull();
     if (row != null) {
-      // deleteDocument removed the FTS row; recreate its metadata entry.
+      // Recreate the metadata entry (body comes back via the indexer).
       await _syncFtsMeta(row.id, row.title, row.author);
     }
   }
@@ -248,9 +270,12 @@ class LibraryRepository {
           .write(DocumentsCompanion(
               isFavourite: Value(value), updatedAt: Value(DateTime.now())));
 
-  /// Soft-deletes the row and removes its sandbox files. Returns the
-  /// export-safe display data first (caller snapshots for undo UI later).
-  Future<void> deleteDocument(int id) async {
+  /// Tombstones the row and drops it from search.
+  ///
+  /// With [keepArtifacts] the reading position, group links, annotation
+  /// tombstones and sandbox files are retained so the UI can offer an undo;
+  /// [`purgeDocumentArtifacts`] must then run once the undo window closes.
+  Future<void> deleteDocument(int id, {bool keepArtifacts = false}) async {
     final doc = await byId(id);
     if (doc == null) return;
     await (_db.update(_db.documents)..where((d) => d.id.equals(id)))
@@ -264,6 +289,16 @@ class LibraryRepository {
       [id],
     );
 
+    if (!keepArtifacts) await purgeDocumentArtifacts(id);
+  }
+
+  /// Removes everything still attached to a soft-deleted row: positions,
+  /// group links, annotation tombstones and sandbox files. Idempotent, so it
+  /// is safe as the undo window's fallback and as a boot sweep.
+  Future<void> purgeDocumentArtifacts(int id) async {
+    final doc = await byIdAny(id);
+    if (doc == null || doc.deletedAt == null) return;
+
     // Cascade: positions and group links would otherwise linger forever and
     // resurface if the same file is re-imported.
     await (_db.delete(_db.readingPositions)
@@ -276,7 +311,8 @@ class LibraryRepository {
           ..where((dt) => dt.documentId.equals(id)))
         .go();
     // Annotations are tombstoned (not deleted) so removals propagate via sync.
-    await (_db.update(_db.annotations)..where((a) => a.documentId.equals(id)))
+    await (_db.update(_db.annotations)
+          ..where((a) => a.documentId.equals(id) & a.deletedAt.isNull()))
         .write(AnnotationsCompanion(
       deletedAt: Value(DateTime.now()),
       updatedAt: Value(DateTime.now()),
@@ -286,7 +322,18 @@ class LibraryRepository {
       await AppPaths.deleteBookDir(doc.uuid);
       await AppPaths.deleteCover(doc.uuid);
     } on FileSystemException {
-      // Disk layer best-effort; row is soft-deleted either way.
+      // Disk layer best-effort; row stays soft-deleted either way.
+    }
+  }
+
+  /// Boot safety net: app was killed inside the undo window (or a previous
+  /// purge failed), so finish cleanup for every tombstoned row.
+  Future<void> purgeAbandonedArtifacts() async {
+    final rows = await (_db.select(_db.documents)
+          ..where((d) => d.deletedAt.isNotNull()))
+        .get();
+    for (final row in rows) {
+      await purgeDocumentArtifacts(row.id);
     }
   }
 

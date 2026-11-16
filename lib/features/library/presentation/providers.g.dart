@@ -233,14 +233,23 @@ String _$textIndexRepositoryHash() =>
     r'b9e0a38515afc76e647e8935d24bd0b4228256d6';
 
 /// Library view state (sort/chip/search) + grid-vs-list presentation mode.
+///
+/// Grid/sort/chip survive cold starts via shared_preferences; the search text
+/// is session-only.
 
 @ProviderFor(LibraryPrefs)
 final libraryPrefsProvider = LibraryPrefsProvider._();
 
 /// Library view state (sort/chip/search) + grid-vs-list presentation mode.
+///
+/// Grid/sort/chip survive cold starts via shared_preferences; the search text
+/// is session-only.
 final class LibraryPrefsProvider
     extends $NotifierProvider<LibraryPrefs, LibraryPrefsState> {
   /// Library view state (sort/chip/search) + grid-vs-list presentation mode.
+  ///
+  /// Grid/sort/chip survive cold starts via shared_preferences; the search text
+  /// is session-only.
   LibraryPrefsProvider._()
     : super(
         from: null,
@@ -268,9 +277,12 @@ final class LibraryPrefsProvider
   }
 }
 
-String _$libraryPrefsHash() => r'1c840959ec4bfadb55b905315ba7d1564561657f';
+String _$libraryPrefsHash() => r'ffc4a1358a8e56a28f403b0195be48aaa92d2c17';
 
 /// Library view state (sort/chip/search) + grid-vs-list presentation mode.
+///
+/// Grid/sort/chip survive cold starts via shared_preferences; the search text
+/// is session-only.
 
 abstract class _$LibraryPrefs extends $Notifier<LibraryPrefsState> {
   LibraryPrefsState build();
@@ -290,15 +302,11 @@ abstract class _$LibraryPrefs extends $Notifier<LibraryPrefsState> {
   }
 }
 
-/// Import run state for UI feedback.
-
 @ProviderFor(ImportRunner)
 final importRunnerProvider = ImportRunnerProvider._();
 
-/// Import run state for UI feedback.
 final class ImportRunnerProvider
-    extends $NotifierProvider<ImportRunner, String> {
-  /// Import run state for UI feedback.
+    extends $NotifierProvider<ImportRunner, ImportProgress> {
   ImportRunnerProvider._()
     : super(
         from: null,
@@ -318,29 +326,27 @@ final class ImportRunnerProvider
   ImportRunner create() => ImportRunner();
 
   /// {@macro riverpod.override_with_value}
-  Override overrideWithValue(String value) {
+  Override overrideWithValue(ImportProgress value) {
     return $ProviderOverride(
       origin: this,
-      providerOverride: $SyncValueProvider<String>(value),
+      providerOverride: $SyncValueProvider<ImportProgress>(value),
     );
   }
 }
 
-String _$importRunnerHash() => r'ab7107f7b4d82faeb9692592fac4432fbec76bba';
+String _$importRunnerHash() => r'c23b66432ab7e9b4b0bb9fc4c140664c1b56b9bb';
 
-/// Import run state for UI feedback.
-
-abstract class _$ImportRunner extends $Notifier<String> {
-  String build();
+abstract class _$ImportRunner extends $Notifier<ImportProgress> {
+  ImportProgress build();
   @$mustCallSuper
   @override
   void runBuild() {
-    final ref = this.ref as $Ref<String, String>;
+    final ref = this.ref as $Ref<ImportProgress, ImportProgress>;
     final element =
         ref.element
             as $ClassProviderElement<
-              AnyNotifier<String, String>,
-              String,
+              AnyNotifier<ImportProgress, ImportProgress>,
+              ImportProgress,
               Object?,
               Object?
             >;
