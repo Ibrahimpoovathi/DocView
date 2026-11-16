@@ -18,6 +18,7 @@ import '../data/book_server.dart';
 import '../data/foliate_assets.dart';
 import '../data/reading_repository.dart';
 import '../domain/annotations.dart';
+import '../domain/restore.dart';
 import '../../library/presentation/providers.dart';
 import '../../dictionary/presentation/dictionary_sheet.dart';
 import '../../sync/presentation/sync_providers.dart';
@@ -130,22 +131,32 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
   }
 
   Future<void> _prepare() async {
-    // Restore color mode + last position before building the webview URL.
-    if (widget.doc != null) {
-      final pos =
-          await ref.read(readingRepositoryProvider).ensure(widget.doc!.id);
-      _annotations =
-          await ref.read(annotationsRepositoryProvider).listForDoc(widget.doc!.id);
+    // Restore color mode + last position *before* the URL is built/cached: the
+    // URL embeds frac/loc, and creating it earlier silently dropped the saved
+    // position on every open.
+    try {
+      if (widget.doc != null) {
+        final pos =
+            await ref.read(readingRepositoryProvider).ensure(widget.doc!.id);
+        _annotations = await ref
+            .read(annotationsRepositoryProvider)
+            .listForDoc(widget.doc!.id);
+        if (!mounted) return;
+        final progress = sanitizeProgress(pos.progress);
+        final location = sanitizeLocation(pos.location);
+        setState(() {
+          _colorMode = pos.colorMode;
+          _fraction = progress ?? 0;
+          _location = location;
+          _permilleViewed =
+              progress != null && progress > 0 ? (progress * 1000).round() : null;
+        });
+      }
+    } on Object catch (e, st) {
+      debugPrint('[reflow] restore failed: $e\n$st');
+      if (mounted) setState(() => _error = e.toString());
+    } finally {
       _ensureBookUrl();
-      if (!mounted) return;
-      setState(() {
-        _colorMode = pos.colorMode;
-        if (pos.progress != null) _fraction = pos.progress!;
-        _location = pos.location;
-        _permilleViewed = (pos.progress ?? 0) > 0
-            ? (pos.progress! * 1000).round()
-            : null;
-      });
     }
   }
 
@@ -607,6 +618,13 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
     return Scaffold(
       backgroundColor: cs.surface,
       appBar: AppBar(
+        leading: IconButton(
+          tooltip: 'Back',
+          onPressed: () {
+            if (context.canPop()) context.pop();
+          },
+          icon: const Icon(Icons.arrow_back_rounded),
+        ),
         title: Text(
           _title(),
           maxLines: 1,
@@ -690,19 +708,19 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
                 FutureBuilder<WebUri>(
                   future: _ensureBookUrl(),
                   builder: (context, snap) {
-                    if (snap.connectionState != ConnectionState.done ||
-                        snap.data == null) {
-                      return _PulseLoader(cs: cs);
-                    }
                     if (_error != null) {
                       return EmptyState(
                         icon: Icons.error_outline_rounded,
                         heading: 'Could not open',
                         body: _error!,
                         actionLabel: 'Back',
-          actionIcon: Icons.arrow_back_rounded,
+                        actionIcon: Icons.arrow_back_rounded,
                         onAction: () => context.pop(),
                       );
+                    }
+                    if (snap.connectionState != ConnectionState.done ||
+                        snap.data == null) {
+                      return _PulseLoader(cs: cs);
                     }
                     return InAppWebView(
                       initialUrlRequest: URLRequest(url: snap.data!),
@@ -721,6 +739,7 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
                             'The document viewer crashed while rendering. '
                             'Reopening may help.');
                         _web = null;
+                        _bookUrlFuture = null;
                         unawaited(BookServer.resetAfterCrash());
                       },
                       onWebViewCreated: (c) {

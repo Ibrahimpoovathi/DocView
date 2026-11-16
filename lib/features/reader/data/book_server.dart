@@ -101,18 +101,26 @@ class BookServer {
     if (_refCount == 0) await stop();
   }
 
-  /// Renderer crash recovery: forget every consumer and restart from scratch
-  /// on the next acquire.
+  /// Renderer crash recovery: restart the socket. Other consumers (the other
+  /// pane of a two-pane reflow, an open dictionary sheet) keep their reference
+  /// count and the per-launch token, so a surviving URL stays valid.
   static Future<void> resetAfterCrash() async {
-    _refCount = 0;
     _starting = null;
     await stop();
+    if (_refCount > 0) {
+      try {
+        await ensureRunning();
+      } on Object {
+        // The next acquire() will retry.
+      }
+    }
   }
 
   static Future<void> stop() async {
     final s = _server;
     _server = null;
-    _token = null;
+    // Deliberately keep _token: it is per app launch, and URLs built just
+    // before a stop/restart must keep authenticating afterwards.
     await s?.close(force: true);
   }
 

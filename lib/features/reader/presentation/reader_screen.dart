@@ -13,6 +13,8 @@ import '../../../core/format/doc_format.dart';
 import '../../../core/storage/database.dart';
 import '../../library/presentation/providers.dart';
 import '../domain/annotations.dart';
+import '../data/reading_repository.dart';
+import '../domain/restore.dart';
 import '../domain/viewer_prefs.dart';
 import 'annotation_palette.dart';
 import 'annotation_sheets.dart';
@@ -73,6 +75,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   int _pageCount = 1;
   bool _booting = true;
   bool _searchOpen = false;
+  String? _loadError;
 
   /// Immersive reading: a tap on the page hides the top/bottom bars (PDF only).
   bool _barsVisible = true;
@@ -80,6 +83,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
 
   final _searchCtrl = TextEditingController();
   Timer? _saveDebounce;
+
+  /// Captured in initState: dispose() flushes progress and must never use ref
+  /// (unmounted-ref) or the detached pdfrx controller.
+  late final ReadingRepository _readingRepo;
 
   // Annotations: DB rows for this document; PDF page text cache for painting
   // highlight rects (filled lazily per page — loadStructuredText is async
@@ -90,6 +97,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   @override
   void initState() {
     super.initState();
+    _readingRepo = ref.read(readingRepositoryProvider);
     WidgetsBinding.instance.addObserver(this);
     _load();
   }
@@ -114,30 +122,40 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       _booting = false;
       return;
     }
-    final repo = ref.read(libraryRepositoryProvider);
-    final doc = await repo.byId(widget.docId);
-    if (!mounted) return;
-    if (doc == null) {
-      _doc = null;
-      _booting = false;
-      return;
+    try {
+      final repo = ref.read(libraryRepositoryProvider);
+      final doc = await repo.byId(widget.docId);
+      if (!mounted) return;
+      if (doc == null) {
+        _doc = null;
+        _booting = false;
+        return;
+      }
+      await repo.markOpened(doc.id);
+      final pos = await _readingRepo.ensure(doc.id);
+      if (!mounted) return;
+      final page = clampRestoredPage(pos.pageNumber, null);
+      if (doc.format == DocFormat.pdf) {
+        _annotations = await ref
+            .read(annotationsRepositoryProvider)
+            .listForDoc(doc.id);
+      }
+      if (!mounted) return;
+      setState(() {
+        _doc = doc;
+        _colorMode = pos.colorMode;
+        _initialPage = page;
+        _pageNumber = page;
+        _booting = false;
+      });
+    } on Object catch (e, st) {
+      debugPrint('[reader] load failed: $e\n$st');
+      if (!mounted) return;
+      setState(() {
+        _loadError = e.toString();
+        _booting = false;
+      });
     }
-    await repo.markOpened(doc.id);
-    final pos = await ref.read(readingRepositoryProvider).ensure(doc.id);
-    if (!mounted) return;
-    if (doc.format == DocFormat.pdf) {
-      _annotations = await ref
-          .read(annotationsRepositoryProvider)
-          .listForDoc(doc.id);
-    }
-    if (!mounted) return;
-    setState(() {
-      _doc = doc;
-      _colorMode = pos.colorMode;
-      _initialPage = pos.pageNumber;
-      _pageNumber = pos.pageNumber;
-      _booting = false;
-    });
     if (batteryHook && batterySearchTerm.isNotEmpty) {
       // Actual startTextSearch happens in onViewerReady once the searcher
       // exists; opening the bar early still commits the query text.
@@ -151,19 +169,20 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   void _flushSave() {
     if (!_canSave) return;
     // pdf-only state: pdfrx controllers are never attached for reflow/office
-    // formats, so pageNumber would throw on their unmounted null _state.
+    // formats. Never query _ctl here: its _state is already null when the
+    // viewer is disposed before this state (crash: "Null check operator used
+    // on a null value" -> blank app). _pageNumber is the tracked value.
     if (_doc!.format != DocFormat.pdf) return;
-    final n = _ctl.pageNumber;
-    if (n == null) return;
     _saveDebounce?.cancel();
-    ref.read(readingRepositoryProvider).savePage(_doc!.id, n);
+    if (_pageNumber < 1) return;
+    unawaited(_readingRepo.savePage(_doc!.id, _pageNumber));
   }
 
   void _scheduleSave() {
     if (!_canSave) return;
     _saveDebounce?.cancel();
     _saveDebounce = Timer(const Duration(milliseconds: 600), () {
-      ref.read(readingRepositoryProvider).savePage(_doc!.id, _pageNumber);
+      _readingRepo.savePage(_doc!.id, _pageNumber);
     });
   }
 
@@ -374,6 +393,19 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
+    if (_loadError != null) {
+      return _ReaderScaffold(
+        child: EmptyState(
+          icon: Icons.error_outline_rounded,
+          heading: 'Could not open this document',
+          body: _loadError!,
+          actionLabel: 'Back',
+          actionIcon: Icons.arrow_back_rounded,
+          onAction: () => context.pop(),
+        ),
+      );
+    }
+
     if (_booting) {
       return _ReaderScaffold(
         child: Center(
@@ -472,6 +504,16 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                 ? SizedBox(
                     width: double.infinity,
                     child: AppBar(
+                      // The in-body AppBar has no implied back button; the
+                      // navigator check can report false mid-transition, so
+                      // always render one and let go_router handle the pop.
+                      leading: IconButton(
+                        tooltip: 'Back',
+                        icon: const Icon(Icons.arrow_back_rounded),
+                        onPressed: () {
+                          if (context.canPop()) context.pop();
+                        },
+                      ),
                       title: Text(
                         title,
                         maxLines: 1,
@@ -605,10 +647,17 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                     _scheduleSave();
                   },
                   onViewerReady: (document, _) {
+                    final pages = document.pages.length;
+                    final requested = _initialPage;
+                    final page = clampRestoredPage(_pageNumber, pages);
                     setState(() {
-                      _pageCount = document.pages.length;
+                      _pageCount = pages;
+                      _pageNumber = page;
                       _searcher ??= pdfrx.PdfTextSearcher(_ctl);
                     });
+                    if (requested != page) {
+                      _ctl.goToPage(pageNumber: page);
+                    }
                     if (batteryHook &&
                         batterySearchTerm.isNotEmpty &&
                         !_batterySearchStarted) {

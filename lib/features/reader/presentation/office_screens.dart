@@ -18,6 +18,7 @@ import '../data/odt_text.dart';
 import '../data/pptx_text.dart';
 import '../data/rtf_text.dart';
 import '../data/text_search.dart';
+import '../domain/restore.dart';
 import '../domain/viewer_prefs.dart';
 import '../../library/presentation/providers.dart';
 import '../../dictionary/presentation/dictionary_sheet.dart';
@@ -80,8 +81,9 @@ abstract class OfficeReaderState<W extends ConsumerStatefulWidget>
       if (canSave) {
         final pos = await ref.read(readingRepositoryProvider).ensure(doc!.id);
         _colorMode = pos.colorMode;
-        if (pos.progress != null) {
-          onProgressRestored(pos.progress!, pos.location);
+        final progress = sanitizeProgress(pos.progress);
+        if (progress != null) {
+          onProgressRestored(progress, sanitizeLocation(pos.location));
         }
       }
     } on Object catch (e) {
@@ -215,6 +217,13 @@ abstract class OfficeReaderState<W extends ConsumerStatefulWidget>
       appBar: AppBar(
         backgroundColor: bg,
         surfaceTintColor: Colors.transparent,
+        leading: IconButton(
+          tooltip: 'Back',
+          onPressed: () {
+            if (context.canPop()) context.pop();
+          },
+          icon: const Icon(Icons.arrow_back_rounded),
+        ),
         title: Text(
           doc?.title ?? 'Document',
           maxLines: 1,
@@ -312,9 +321,9 @@ class _DocxScreenState extends OfficeReaderState<DocxScreen> {
   void onProgressRestored(double fraction, String? location) {
     final stored = int.tryParse(location ?? '');
     if (stored != null) {
-      _initialPage = stored;
+      _initialPage = clampRestoredPage(stored, null);
     } else {
-      _pendingFraction = fraction;
+      _pendingFraction = sanitizeProgress(fraction);
     }
   }
 
@@ -378,14 +387,21 @@ class _DocxScreenState extends OfficeReaderState<DocxScreen> {
           onDocumentChanged: (document) {
             final count = document?.pages.length ?? 0;
             if (!mounted) return;
+            final requested = _initialPage;
             setState(() {
               _pageCount = count;
               final pending = _pendingFraction;
               if (pending != null && count > 0) {
                 _pendingFraction = null;
                 _initialPage = (pending * count).round().clamp(1, count);
+              } else {
+                _initialPage = clampRestoredPage(_initialPage, count);
               }
+              _pageNumber = clampRestoredPage(_pageNumber, count);
             });
+            if (count > 0 && _initialPage != requested) {
+              _pdf.goToPage(pageNumber: _initialPage);
+            }
           },
           onPageChanged: (number) {
             if (number == null || number == _pageNumber) return;

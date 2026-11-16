@@ -219,5 +219,12 @@ void main() {
       expect(await status('/files/probe.txt?t=wrong'), 404);
       expect(await status('/files/probe.txt?t=${BookServer.token}'), 200);
     });
+
+    test('token survives stop/restart so held URLs stay valid', () async {
+      final token = BookServer.token;
+      await BookServer.stop();
+      expect(BookServer.token, token);
+      expect(await status('/files/probe.txt?t=$token'), 200);
+    });
   });
 }

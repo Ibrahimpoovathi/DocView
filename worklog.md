@@ -946,3 +946,51 @@ keystore (CN=DocView), battery defines absent (strings check: 0 hits).
 **Verification**: `flutter analyze` clean; `flutter test` 91/91 green.
 
 **Release**: 1.0.3+13, arm64 `releases/DocView.apk` rebuilt signed.
+
+---
+
+## 2026-11-16 · 1.0.4 — Blank-on-second-open regression
+
+**Bug**: after a first document rendered fine, every later open showed a
+blank gray screen (reproducible after PDF→Back→EPUB on quick_phone).
+
+**Root cause** (logcat): pressing Back after a PDF threw during dispose —
+`Null check operator used on a null value`, `PdfViewerController._state` →
+`pageNumber` → `_ReaderScreenState._flushSave` → `dispose`. pdfrx detaches
+the controller before the parent disposes, so the flush crashed a frame and
+later pushes painted nothing. In the same pass the in-body AppBar turned out
+to have no visible back arrow.
+
+**Fixes**
+
+- `reader_screen.dart`: `_readingRepo` captured once in `initState`;
+  `_flushSave` no longer touches `ref` or `_ctl.pageNumber` (uses
+  `_pageNumber`); `_load` guarded → `_loadError` EmptyState with Back;
+  restored page clamped and applied after `onViewerReady`; explicit
+  `arrow_back_rounded` IconButton in the in-body AppBar.
+- New `reader/domain/restore.dart`: `clampRestoredPage`, `sanitizeProgress`,
+  `sanitizeLocation` (length-bounded); used by reflow, office and PDF paths.
+- `reflow_screen.dart`: restore state is sanitized **before** the
+  `_bookUrlFuture` is created (positions were silently dropped before);
+  FutureBuilder shows `_error` before the loader; renderer crash clears the
+  stale URL future; AppBar gained an explicit back arrow.
+- `book_server.dart`: `stop()` keeps the per-launch token so held document
+  URLs stay valid; `resetAfterCrash()` no longer zeroes the refcount and
+  restarts the socket when consumers remain.
+- `main.dart`: friendly `ErrorWidget.builder` plus global
+  `FlutterError.onError` / `PlatformDispatcher.instance.onError` logging, so a
+  rendering failure can never look like a silent gray screen again.
+- `office_screens.dart`: sanitized restore, clamped page, explicit back
+  arrow in the shared office AppBar.
+
+**Verification**: `flutter analyze` clean; `flutter test` 100/100 green
+(new `test/restore_test.dart` with 9 cases; `regression_test.dart` gained a
+"token survives stop/restart" case). Manual reopen matrix on quick_phone:
+PDF→Back→PDF, PDF→Back→EPUB, EPUB→Back→EPUB, DOCX→Back→DOCX, XLSX, TXT —
+all render, back arrows visible, 0 `E/flutter`, 0 NULL-check, 0 FATAL.
+`tool/battery_all.sh` across quick_phone / old_phone / pixel_7 /
+pixel_tablet: ALL FATAL-FREE; tablet 2-pane PDF and EPUB reopen with the
+library pane live and progress restored (8%).
+
+**Release**: 1.0.4+14, arm64 `releases/DocView.apk` rebuilt signed,
+battery defines absent.
