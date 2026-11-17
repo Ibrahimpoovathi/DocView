@@ -1184,6 +1184,24 @@ in the two entries above, which is how the Kotlin and Gradle findings surfaced i
 the first place.
 
 **The one genuinely open gap** is the transitive Maven graph beneath AGP 9.1.0
-and Kotlin 2.4.21. Resolving it requires an Android SDK and a Flutter toolchain,
-neither of which exists in this environment; Dependabot (`gradle` ecosystem,
-weekly) is the standing safety net until someone resolves it on a build machine.
+and Kotlin 2.4.21. The scanner names its own missing input, once per module:
+
+```
+No resolved dependency file for android/app/build.gradle.kts.
+No resolved dependency file for android/build.gradle.kts.
+```
+
+What it needs is a **Gradle dependency lockfile**, not a different scanner. To
+close this on a build machine that has the Android SDK and Flutter toolchain:
+
+1. add `dependencyLocking { lockAllConfigurations() }` to the `app` module,
+2. run `./gradlew :app:dependencies --write-locks`,
+3. commit the resulting `gradle.lockfile` — the graph becomes resolvable and the
+   scan stops reporting `incomplete`.
+
+Dependency locking was deliberately **not** enabled here: Gradle fails any build
+whose configuration has locking enabled but no lock state file, so adding it
+without being able to generate the lockfile would break the build instead of
+fixing the scan. Versions were not invented to satisfy the scanner either.
+Dependabot (`gradle` ecosystem, weekly) keeps the declared plugin and artifact
+versions current in the meantime.
