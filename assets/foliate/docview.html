@@ -48,6 +48,19 @@ const colorMode = params.get('color') ?? 'normal'
 const goFraction = params.get('frac')
 const goLocation = params.get('loc')
 
+// Reader typography. Applied through pageCSS so it survives section loads (each
+// section renders into its own document), and adjustable live via
+// window.docviewSetTypography from the Flutter typography sheet.
+const clampNum = (v, lo, hi, fallback) => {
+  const n = parseFloat(v ?? '')
+  return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : fallback
+}
+
+let TYPO = {
+  size: clampNum(params.get('size'), 70, 180, 100),        // percent
+  spacing: clampNum(params.get('spacing'), 1.2, 2.2, 1.5), // line-height
+}
+
 const view = document.createElement('foliate-view')
 document.body.append(view)
 
@@ -66,6 +79,7 @@ const pageCSS = () => `
     html {
         color-scheme: ${colorMode === 'dark' ? 'dark' : 'light'};
         background: ${THEME_VIS.bg};
+        font-size: ${TYPO.size}%;
     }
     body {
         background: ${THEME_VIS.bg};
@@ -77,9 +91,27 @@ const pageCSS = () => `
         color: ${THEME_VIS.fg};
     }
     a:link { color: ${THEME_VIS.fg}; }
-    p, li, blockquote, dd { line-height: 1.5; text-align: start; }
+    p, li, blockquote, dd { line-height: ${TYPO.spacing}; text-align: start; }
     pre { white-space: pre-wrap !important; }
 `
+
+// Each section renders into its own document, so restyling means rewriting the
+// injected <style> in every live content document. renderer.setStyles is not
+// available on this paginator, so do it directly.
+const injectStyles = doc => {
+  if (!doc?.head) return
+  let el = doc.getElementById('docview-style')
+  if (!el) {
+    el = doc.createElement('style')
+    el.id = 'docview-style'
+    doc.head.append(el)
+  }
+  el.textContent = pageCSS()
+}
+
+const applyStyles = () => {
+  for (const { doc } of view.renderer?.getContents?.() ?? []) injectStyles(doc)
+}
 
 const themeFor = mode =>
   mode === 'dark'
@@ -96,7 +128,17 @@ window.docviewSetColor = mode => {
   THEME_VIS = themeFor(mode)
   document.documentElement.style.background = THEME_VIS.bg
   document.body.style.background = THEME_VIS.bg
-  view.renderer?.setStyles?.(pageCSS())
+  applyStyles()
+}
+
+// Live typography switch: size is a percent of the base font, spacing is the
+// line-height multiplier applied to body text.
+window.docviewSetTypography = (size, spacing) => {
+  const s = parseFloat(size)
+  const sp = parseFloat(spacing)
+  if (Number.isFinite(s)) TYPO.size = Math.min(180, Math.max(70, s))
+  if (Number.isFinite(sp)) TYPO.spacing = Math.min(2.2, Math.max(1.2, sp))
+  applyStyles()
 }
 
 const open = async () => {
@@ -248,9 +290,7 @@ const open = async () => {
   view.addEventListener('load', ({ detail }) => {
     const doc = detail.doc
     if (!doc?.head) return
-    const $style = doc.createElement('style')
-    $style.textContent = pageCSS()
-    doc.head.append($style)
+    injectStyles(doc)
     attachSelectionBridge(doc)
   })
 
@@ -292,7 +332,7 @@ const open = async () => {
     })
   })
 
-  view.renderer?.setStyles?.(pageCSS())
+  applyStyles()
 
   if (goLocation && goLocation !== 'first') {
     await view.init({ lastLocation: goLocation })
