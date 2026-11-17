@@ -1061,3 +1061,36 @@ Stages E/F and 1.0.4). The items below were still live in the code.
   ref, word)`, `ImportedDict.bookName`, `DictionaryEntry.meanings`,
   `LookupHistory.recent/record/clear`, `paginator.getContents()`). The new CI
   workflow is what should confirm analyze/test green on the next push.
+
+### 1.0.5+15 — Dependency security: Kotlin Gradle plugin advisory fixed
+
+The dependency scan cannot resolve the Android Gradle graph (no `gradle.lockfile`
+in the repo and no Android SDK here to generate one), so the declared build
+artifacts were checked directly against OSV.
+
+**Found and fixed**
+
+- `GHSA-r937-wjx7-w2jp` / `CVE-2026-53914` — JetBrains Kotlin *before 2.4.20*:
+  unsafe deserialization in build-cache metadata enables code execution.
+  `android/settings.gradle.kts` pinned `org.jetbrains.kotlin.android` at
+  **2.4.0**, inside the affected range. Bumped to **2.4.21**, the latest stable
+  2.4.x patch (OSV reports 0 advisories for 2.4.20 and 2.4.21).
+
+**Checked, no advisories**
+
+- `com.android.tools.build:gradle` 9.1.0 (AGP)
+- `androidx.test:runner` 1.6.2, `androidx.test:rules` 1.6.1,
+  `androidx.test:monitor` 1.6.1, `androidx.test:junit` 1.2.1
+- `androidx.test.espresso:espresso-core` 3.6.1,
+  `androidx.test.espresso:espresso-idling-resource` 3.6.1
+
+**Still uncovered — needs an Android SDK / Gradle resolution**
+
+- The transitive Gradle dependency graph: AGP and Kotlin pull hundreds of
+  artifacts that only dependency resolution reveals.
+- The Gradle 9.3.1 distribution itself; OSV has no ecosystem entry for Gradle
+  distributions, so this pipeline never scans it.
+
+To close it: enable Dependabot for the `gradle` ecosystem, or resolve the graph
+on a machine with the Android SDK and commit the resulting lockfile. Pub
+coverage is unaffected (198 packages, 0 findings).
