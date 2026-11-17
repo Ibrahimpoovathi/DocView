@@ -1,0 +1,29 @@
+# Dependency monitoring for ecosystems the offline scanner cannot resolve.
+#
+# The AppJet dependency scan reads pubspec.lock (198 packages) but cannot read
+# android/build.gradle.kts or android/app/build.gradle.kts, because a Gradle
+# dependency lockfile can only be produced by resolving the graph on a machine
+# with the Android SDK and Flutter toolchain. Dependabot resolves those files
+# on GitHub's runners, so the declared layer stays under continuous watch.
+#
+# Delete this file to opt out.
+version: 2
+
+updates:
+  - package-ecosystem: "pub"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "gradle"
+    directory: "/android"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
