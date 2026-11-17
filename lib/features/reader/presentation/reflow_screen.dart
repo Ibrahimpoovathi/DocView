@@ -71,6 +71,9 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
 
   Timer? _saveDebounce;
 
+  /// Coalesces bottom-bar rebuilds while the document streams scroll events.
+  Timer? _chromeThrottle;
+
   /// Reading repo captured in initState — dispose() flushes progress and
   /// must not call ref.read (unmounted-ref crash during the audit battery).
   late final ReadingRepository _readingRepo;
@@ -116,12 +119,24 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
     _flushSave();
     _searchDebounce?.cancel();
     _dictDebounce?.cancel();
+    _chromeThrottle?.cancel();
     _searchCtrl.dispose();
     if (_serverAcquired) {
       _serverAcquired = false;
       unawaited(BookServer.release());
     }
     super.dispose();
+  }
+
+  /// The bottom bar renders the scroll position, so the chrome has to repaint
+  /// as the document scrolls; the bridge fires far more often than a frame, so
+  /// coalesce the rebuilds instead of calling setState on every event.
+  void _scheduleChromeRefresh() {
+    if (!mounted || _chromeThrottle != null) return;
+    _chromeThrottle = Timer(const Duration(milliseconds: 120), () {
+      _chromeThrottle = null;
+      if (mounted) setState(() {});
+    });
   }
 
   Future<void> _flushSave() async {
@@ -286,7 +301,10 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
     );
   }
 
-  static String _jsonStr(String s) => "'${s.replaceAll("'", r"\'")}'";
+  /// A JS string literal. jsonEncode escapes quotes, backslashes, newlines
+  /// and control characters; hand-rolling the quote escape broke any TOC
+  /// href containing a backslash.
+  static String _jsonStr(String s) => jsonEncode(s);
 
   // --- annotations -------------------------------------------------------------
 
@@ -760,6 +778,7 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
                               _location = cfi;
                             }
                             _scheduleSave();
+                            _scheduleChromeRefresh();
                           },
                         );
                         c.addJavaScriptHandler(
@@ -861,6 +880,8 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
                           handlerName: 'onReflowSearchResults',
                           callback: (args) {
                             if (!mounted) return;
+                            // A closed search must not repopulate its results.
+                            if (!_searchOpen) return;
                             final payload = args.isNotEmpty
                                 ? args.first as Map
                                 : const <String, dynamic>{};
@@ -875,11 +896,6 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
                                     post: '${m['post'] ?? ''}',
                                   ),
                             ];
-                            if (_searchOpen &&
-                                _hits.isEmpty &&
-                                hits.isEmpty &&
-                                payload['failed'] != null) {
-                            }
                             setState(() {
                               _searching = false;
                               _searchFailed = payload['failed'] != null;
@@ -889,8 +905,11 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
                           },
                         );
                       },
-                      onLoadStop: (_, _) =>
-                          setState(() => _booting = false),
+                      onLoadStop: (_, _) {
+                        // The route can be popped while the page is still
+                        // loading; setState after dispose throws.
+                        if (mounted) setState(() => _booting = false);
+                      },
                       onConsoleMessage: (_, msg) {
                         debugPrint(
                             '[console/${msg.messageLevel}] ${msg.message}');
