@@ -1287,3 +1287,73 @@ versions — and it is the first time the Android side has been inspected at all
 
 This does **not** change the scanner's `incomplete` status: only the lockfile
 does that.
+
+## The AGP upgrade, tested: it is not enough
+
+The recommendation above — "upgrade AGP to the newest 9.x and re-resolve" — has
+now been tested rather than assumed, and it is only partly right.
+
+Published versions: the AGP stable line runs to **9.5.1** (`9.6.0` is still
+alpha, so it is not a candidate). Kotlin stable is **2.4.21**, already the
+declared version.
+
+Resolving `com.android.tools.build:gradle:9.5.1` the same way gives 109
+artifacts and **7 advisories instead of 10**. The upgrade moves BouncyCastle
+1.79 → 1.80.2, which clears exactly three:
+
+| Cleared by AGP 9.5.1 | Fixed in |
+|---|---|
+| CVE-2025-14813 — **critical** (GOST keystream reuse) | 1.80.2 |
+| CVE-2026-5598 — high (covert timing channel) | 1.80.2 |
+| CVE-2026-0636 — moderate (LDAP injection) | 1.80.2 |
+
+Still present after the upgrade — **7 advisories, one of them critical**:
+
+| Artifact | Version in 9.5.1 | Advisory | Severity | Needs |
+|---|---|---|---|---|
+| `bcprov-jdk18on` | 1.80.2 | CVE-2026-8763 — name-constraints bypass | **Critical** | 1.85 |
+| `bcprov-jdk18on` | 1.80.2 | CVE-2026-13506 — ASN.1 depth-guard reset | High | 1.85 |
+| `bcpkix-jdk18on` | 1.80.2 | CVE-2026-5588 | Moderate | 1.84 |
+| `guava` | 33.3.1-jre | CVE-2026-102554 | High | 33.7.2 |
+| `jdom2` | 2.0.6 | CVE-2021-33813 — XXE | High | 2.0.6.1 |
+| `jose4j` | 0.9.5 | CVE-2024-29371 | High | 0.9.6 |
+| `commons-lang3` | 3.16.0 | CVE-2025-48924 | Moderate | 3.18.0 |
+
+A version bump alone therefore does **not** close this. The decisive fix has to
+force BouncyCastle to 1.85 plus the other four onto the buildscript classpath.
+
+### Why the bump was not applied here
+
+`android/settings.gradle.kts` declares AGP `9.1.0`, and
+`android/app/build.gradle.kts` delegates `compileSdk`/`minSdk`/`targetSdk` to the
+Flutter SDK (`flutter.compileSdkVersion`), so there is no pinned SDK level to
+reconcile — the bump is mechanically clean.
+
+It was still not applied, for two reasons:
+
+- It removes 3 of 10 advisories and leaves a **critical** standing. That is a
+  partial result, not the goal, so it does not justify an unverifiable change to
+  the build on its own.
+- The decisive fix needs a `buildscript { configurations.classpath {
+  resolutionStrategy { ... } } }` restructure inside a Flutter settings script.
+  That is unusual, and only a real Gradle build can prove it does not break the
+  plugin classpath.
+
+Every remaining advisory is **build-time only** — none ships in the APK. Trading
+a possibly broken build for a partial fix, when neither can be verified in this
+environment, is a bad trade. The app keeps a build that is expected to work, and
+the exact remediation travels with it.
+
+### Corrected remediation, on a build machine
+
+1. Bump AGP `9.1.0` → `9.5.1` — clears the two 1.80.2-fixed findings.
+2. Add a buildscript-classpath force for `org.bouncycastle:bcprov-jdk18on:1.85`,
+   `org.bouncycastle:bcpkix-jdk18on:1.85`, `com.google.guava:guava:33.7.2`,
+   `org.apache.commons:commons-lang3:3.18.0`, `org.bitbucket.b_c:jose4j:0.9.6`,
+   `org.jdom:jdom2:2.0.6.1`.
+3. Run `./gradlew assembleDebug` and watch for `NoSuchMethodError` — that is how a
+   bad classpath force announces itself.
+4. Re-run the Maven resolution and confirm zero advisories.
+
+Step 3 is not optional: it is the only thing that turns a plausible pin into a
+verified one.
