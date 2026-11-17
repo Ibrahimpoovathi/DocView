@@ -14,6 +14,7 @@ import '../../../core/paths/app_paths.dart';
 import '../../../core/design/widgets/empty_state.dart';
 import '../../../core/format/doc_format.dart';
 import '../../../core/storage/database.dart';
+import '../../../core/storage/prefs.dart';
 import '../data/book_server.dart';
 import '../data/foliate_assets.dart';
 import '../data/reading_repository.dart';
@@ -73,6 +74,15 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
 
   /// Coalesces bottom-bar rebuilds while the document streams scroll events.
   Timer? _chromeThrottle;
+
+  /// Reader typography. Global across books, persisted in prefs, and handed to
+  /// the engine in the page URL so the first paint already uses it.
+  int _fontPercent = 100;
+  double _lineSpacing = 1.5;
+  static const int _minFont = 70;
+  static const int _maxFont = 180;
+  static const double _minSpacing = 1.2;
+  static const double _maxSpacing = 2.2;
 
   /// Reading repo captured in initState — dispose() flushes progress and
   /// must not call ref.read (unmounted-ref crash during the audit battery).
@@ -150,6 +160,13 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
     // URL embeds frac/loc, and creating it earlier silently dropped the saved
     // position on every open.
     try {
+      final prefs = ref.read(sharedPreferencesProvider);
+      _fontPercent = (prefs.getInt('docview.fontPercent') ?? 100)
+          .clamp(_minFont, _maxFont)
+          .toInt();
+      _lineSpacing = (prefs.getDouble('docview.lineSpacing') ?? 1.5)
+          .clamp(_minSpacing, _maxSpacing)
+          .toDouble();
       if (widget.doc != null) {
         final pos =
             await ref.read(readingRepositoryProvider).ensure(widget.doc!.id);
@@ -209,7 +226,9 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
     final q = StringBuffer(
         '$base/foliate/docview.html?src=${Uri.encodeComponent(sourceUrl)}'
         '&t=$t'
-        '&color=${_colorMode.name}');
+        '&color=${_colorMode.name}'
+        '&size=$_fontPercent'
+        '&spacing=${_lineSpacing.toStringAsFixed(2)}');
     if (_fraction > 0.001) {
       q.write('&frac=${_fraction.toStringAsFixed(4)}');
     }
@@ -217,6 +236,123 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
       q.write('&loc=${Uri.encodeComponent(_location!)}');
     }
     return WebUri(q.toString());
+  }
+
+  /// Typography sheet: font size and line spacing. Changes apply live to the
+  /// open document and are persisted once the sheet closes, so dragging a
+  /// slider does not write prefs on every tick.
+  Future<void> _showTypography() async {
+    var size = _fontPercent;
+    var spacing = _lineSpacing;
+
+    void apply() {
+      final ctrl = _web;
+      if (ctrl == null) return;
+      unawaited(ctrl.evaluateJavascript(
+        source: 'window.docviewSetTypography($size, '
+            '${spacing.toStringAsFixed(2)})',
+      ));
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      showDragHandle: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      builder: (sheetCtx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          final text = Theme.of(ctx).textTheme;
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(Dv.sp20, 0, Dv.sp20, Dv.sp24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Text', style: text.titleMedium),
+                const SizedBox(height: Dv.sp16),
+                Row(
+                  children: [
+                    SizedBox(
+                      width: 64,
+                      child: Text('Size', style: text.bodyMedium),
+                    ),
+                    Expanded(
+                      child: Slider(
+                        value: size.toDouble(),
+                        min: _minFont.toDouble(),
+                        max: _maxFont.toDouble(),
+                        divisions: (_maxFont - _minFont) ~/ 5,
+                        label: '$size%',
+                        onChanged: (v) => setSheet(() {
+                          size = v.round();
+                          apply();
+                        }),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 52,
+                      child: Text(
+                        '$size%',
+                        textAlign: TextAlign.end,
+                        style: text.bodyMedium,
+                      ),
+                    ),
+                  ],
+                ),
+                Row(
+                  children: [
+                    SizedBox(
+                      width: 64,
+                      child: Text('Spacing', style: text.bodyMedium),
+                    ),
+                    Expanded(
+                      child: Slider(
+                        value: spacing,
+                        min: _minSpacing,
+                        max: _maxSpacing,
+                        divisions: 10,
+                        label: spacing.toStringAsFixed(1),
+                        onChanged: (v) => setSheet(() {
+                          spacing = double.parse(v.toStringAsFixed(1));
+                          apply();
+                        }),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 52,
+                      child: Text(
+                        spacing.toStringAsFixed(1),
+                        textAlign: TextAlign.end,
+                        style: text.bodyMedium,
+                      ),
+                    ),
+                  ],
+                ),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    onPressed: () => setSheet(() {
+                      size = 100;
+                      spacing = 1.5;
+                      apply();
+                    }),
+                    icon: const Icon(Icons.restart_alt_rounded),
+                    label: const Text('Reset'),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+
+    if (!mounted) return;
+    _fontPercent = size;
+    _lineSpacing = spacing;
+    final prefs = ref.read(sharedPreferencesProvider);
+    await prefs.setInt('docview.fontPercent', size);
+    await prefs.setDouble('docview.lineSpacing', spacing);
   }
 
   void _scheduleSave() {
@@ -961,6 +1097,7 @@ class _ReflowScreenState extends ConsumerState<ReflowScreen>
             },
             colorMode: _colorMode,
             onColorCycle: _cycleColorMode,
+            onTypography: _showTypography,
             onSearchOpen: _openSearch,
             onOutline: _showOutline,
             fractionMode: true,
@@ -1027,18 +1164,23 @@ class _SelectionActionBar extends StatelessWidget {
             ),
             const SizedBox(width: Dv.sp8),
             for (final entry in annotationHex.entries)
-              Padding(
-                padding: const EdgeInsets.only(right: Dv.sp8),
+              // 26dp dot inside an 11dp pad = 48dp tap target, the a11y minimum.
+              Semantics(
+                button: true,
+                label: 'Highlight ${entry.key}',
                 child: InkWell(
                   onTap: () => onColor(entry.key),
                   customBorder: const CircleBorder(),
-                  child: Container(
-                    width: 26,
-                    height: 26,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Color(0xFF000000 |
-                          int.parse(entry.value.substring(1), radix: 16)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(11),
+                    child: Container(
+                      width: 26,
+                      height: 26,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Color(0xFF000000 |
+                            int.parse(entry.value.substring(1), radix: 16)),
+                      ),
                     ),
                   ),
                 ),
@@ -1087,6 +1229,8 @@ class _HitExcerpt extends StatelessWidget {
     return RichText(
       maxLines: 3,
       overflow: TextOverflow.ellipsis,
+      // Respect the system font scale instead of pinning 14px.
+      textScaler: MediaQuery.textScalerOf(context),
       text: TextSpan(
         style: DefaultTextStyle.of(context).style.copyWith(fontSize: 14),
         children: [
