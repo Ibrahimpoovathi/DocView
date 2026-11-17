@@ -104,6 +104,7 @@ class ReaderBottomBar extends StatelessWidget {
     required this.onOutline,
     this.fractionMode = false,
     this.searchEnabled = true,
+    this.onTypography,
   });
 
   final int current;
@@ -119,6 +120,10 @@ class ReaderBottomBar extends StatelessWidget {
   /// slider; onPage still receives 0..1000.
   final bool fractionMode;
   final bool searchEnabled;
+
+  /// Reflow readers only: opens the font-size / line-spacing sheet. Null hides
+  /// the button (the PDF reader has no reflowable typography).
+  final VoidCallback? onTypography;
 
   static const _icons = {
     ViewerColorMode.normal: Icons.contrast_rounded,
@@ -163,6 +168,12 @@ class ReaderBottomBar extends StatelessWidget {
               onPressed: onColorCycle,
               icon: Icon(_icons[colorMode] ?? Icons.contrast_rounded),
             ),
+            if (onTypography != null)
+              IconButton(
+                tooltip: 'Text size and spacing',
+                onPressed: onTypography,
+                icon: const Icon(Icons.text_fields_rounded),
+              ),
             Expanded(
               child: SliderTheme(
                 data: SliderTheme.of(context).copyWith(

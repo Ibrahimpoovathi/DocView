@@ -1010,6 +1010,8 @@ class _OfficeSearchSheetState extends State<_OfficeSearchSheet> {
                           title: RichText(
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
+                            // Respect the system font scale.
+                            textScaler: MediaQuery.textScalerOf(context),
                             text: TextSpan(
                               style: DefaultTextStyle.of(context)
                                   .style
