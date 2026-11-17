@@ -99,32 +99,46 @@ class _DictionarySheetState extends ConsumerState<_DictionarySheet> {
 
   Future<_LookupOutcome> _lookup() async {
     // Offline first (user-imported StarDict), then online fallback.
+    // Providers are read before the first await: the sheet can be dismissed
+    // mid-lookup, and `ref` must not be touched once it is disposed.
     final prefs = ref.read(sharedPreferencesProvider);
+    final online = ref.read(onlineDictionaryProvider);
+    final history = ref.read(lookupHistoryProvider);
     final dicts = DictRegistry(prefs).list();
     String? offlineText;
     String? offlineSource;
-    if (dicts.isNotEmpty) {
-      _engine.setImported(dicts.first);
-      try {
-        offlineText = await _engine.lookup(widget.word);
-        offlineSource = dicts.first.bookName;
-      } catch (e) {
-        debugPrint('[dict] offline lookup failed: $e');
-        offlineText = null;
-      }
-    } else {
+    if (dicts.isEmpty) {
       _engine.setImported(null);
+    } else {
+      // Search every imported dictionary, not only the first: a user with
+      // several StarDict files expects all of them to be consulted.
+      for (final dict in dicts) {
+        _engine.setImported(dict);
+        try {
+          final hit = await _engine.lookup(widget.word);
+          if (hit != null && hit.trim().isNotEmpty) {
+            offlineText = hit;
+            offlineSource = dict.bookName;
+            break;
+          }
+        } catch (e) {
+          debugPrint('[dict] lookup failed in ${dict.bookName}: $e');
+        }
+      }
     }
     DictionaryEntry? onlineEntry;
     final onlineEnabled =
         prefs.getBool('docview.onlineDictionary') ?? false;
-    if (onlineEnabled) {
-      onlineEntry =
-          await ref.read(onlineDictionaryProvider).lookup(widget.word);
+    // The online source is the fallback only, so skip it when a local
+    // dictionary already answered.
+    if (onlineEnabled && (offlineText?.trim().isEmpty ?? true)) {
+      onlineEntry = await online.lookup(widget.word);
     }
-    if (onlineEntry != null && onlineEntry.meanings.isNotEmpty) {
-      // Record even "not found" attempts? No — only real hits make history.
-      await ref.read(lookupHistoryProvider).record(widget.word);
+    final found = (offlineText?.trim().isNotEmpty ?? false) ||
+        (onlineEntry != null && onlineEntry.meanings.isNotEmpty);
+    if (found) {
+      // Only real hits make history — misses would bury useful entries.
+      await history.record(widget.word);
     }
     return _LookupOutcome(
       offlineText: offlineText,

@@ -7,6 +7,8 @@ import '../../../core/design/dv.dart';
 import '../../sync/data/webdav_sync.dart';
 import '../../sync/presentation/sync_providers.dart';
 import '../data/dict_registry.dart';
+import 'dictionary_sheet.dart';
+import 'providers.dart';
 
 /// Settings: dictionary management (offline StarDict import, per-dictionary
 /// removal, online-fallback toggle) + WebDAV sync account.
@@ -20,7 +22,8 @@ class SettingsScreen extends ConsumerStatefulWidget {
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   List<ImportedDict>? _dicts;
   bool _importing = false;
-  bool _onlineEnabled = true;
+  bool _onlineEnabled = false;
+  List<String> _recent = const [];
 
   // WebDAV form state (only used when no account is configured yet).
   final _urlCtrl = TextEditingController();
@@ -40,7 +43,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (!mounted) return;
     setState(() {
       _dicts = DictRegistry(prefs).list();
-      _onlineEnabled = prefs.getBool('docview.onlineDictionary') ?? true;
+      // Opt-in, matching the lookup path in dictionary_sheet.dart.
+      _onlineEnabled = prefs.getBool('docview.onlineDictionary') ?? false;
+      _recent = ref.read(lookupHistoryProvider).recent();
     });
   }
 
@@ -259,10 +264,52 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             onChanged: _toggleOnline,
           ),
           const Divider(),
+          ..._historySection(cs, text),
           ..._syncSection(cs, text),
         ],
       ),
     );
+  }
+
+  /// Recent lookups were recorded but never shown anywhere; surface them so
+  /// the history is reachable and can be tapped to look a word up again.
+  List<Widget> _historySection(ColorScheme cs, TextTheme text) {
+    if (_recent.isEmpty) return const [];
+    return [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(Dv.sp20, Dv.sp12, Dv.sp20, 0),
+        child: Row(
+          children: [
+            Expanded(child: Text('Recent lookups', style: text.titleMedium)),
+            TextButton(
+              onPressed: _clearHistory,
+              child: const Text('Clear'),
+            ),
+          ],
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(Dv.sp20, Dv.sp8, Dv.sp20, Dv.sp12),
+        child: Wrap(
+          spacing: Dv.sp8,
+          runSpacing: Dv.sp8,
+          children: [
+            for (final word in _recent)
+              ActionChip(
+                label: Text(word),
+                visualDensity: VisualDensity.compact,
+                onPressed: () => showDictionarySheet(context, ref, word),
+              ),
+          ],
+        ),
+      ),
+      const Divider(),
+    ];
+  }
+
+  Future<void> _clearHistory() async {
+    await ref.read(lookupHistoryProvider).clear();
+    await _refresh();
   }
 
   List<Widget> _syncSection(ColorScheme cs, TextTheme text) {
