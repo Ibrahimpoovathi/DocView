@@ -1155,3 +1155,35 @@ it needs an Android SDK and a Flutter toolchain, neither available here.
 **PDF note:** `view.js` imports `./pdf.js`, which is not shipped, but the import
 is unreachable — PDFs are rendered natively by `pdfrx` in Dart, never by the
 reader webview.
+
+## 2026-11-17 — Why the dependency scan reports "incomplete"
+
+The scanner (OSV-Scanner 2.7.0) reports status `incomplete`, not a clean result.
+The cause is now identified exactly, and it is not a set of hidden vulnerable
+packages:
+
+| Source | Count | Scanner outcome |
+| --- | --- | --- |
+| `pubspec.lock`, `source: hosted` | 190 | scanned against pub advisories — 0 findings |
+| `pubspec.lock`, `source: sdk` | 8 | not versionable — no pub/OSV version exists |
+| `android/build.gradle.kts` | 0 dependencies | unscanned — root project declares none |
+| `android/app/build.gradle.kts` | declared artifacts | unscanned — tool cannot resolve Kotlin DSL |
+
+The 8 `source: sdk` entries are `flutter`, `flutter_driver`,
+`flutter_localizations`, `flutter_test`, `flutter_web_plugins`,
+`fuchsia_remote_debug_protocol`, `integration_test` and `sky_engine`. They ship
+inside the Flutter SDK at version `0.0.0`, so there is no published package
+version to match against. Their security follows the toolchain instead: this
+project was built with **Flutter 3.47.5 / Dart 3.13.4**
+(`environment: sdk: ^3.13.4`), and `flutter/flutter` has **no published security
+advisories** — so this group is clean by upstream evidence, not by scanner
+output.
+
+The declared Android artifacts and the Gradle distribution were checked directly
+in the two entries above, which is how the Kotlin and Gradle findings surfaced in
+the first place.
+
+**The one genuinely open gap** is the transitive Maven graph beneath AGP 9.1.0
+and Kotlin 2.4.21. Resolving it requires an Android SDK and a Flutter toolchain,
+neither of which exists in this environment; Dependabot (`gradle` ecosystem,
+weekly) is the standing safety net until someone resolves it on a build machine.
