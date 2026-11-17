@@ -1094,3 +1094,31 @@ artifacts were checked directly against OSV.
 To close it: enable Dependabot for the `gradle` ecosystem, or resolve the graph
 on a machine with the Android SDK and commit the resulting lockfile. Pub
 coverage is unaffected (198 packages, 0 findings).
+
+## 2026-11-17 — Vendored reader JavaScript: fflate CVE fixed
+
+**Scope:** `assets/foliate/ext/` — third-party JavaScript bundled into the reader
+webview. No `package.json`, no lockfile and no version strings, so no
+manifest-based scanner covers it; the audit was manual.
+
+**Libraries identified by content:** `@zip.js/zip.js` (36,512 B) and `fflate`
+(3,857 B, exporting only `unzlibSync`).
+
+**Found and fixed:** `GHSA-px8p-9vwx-vf98` / `CVE-2026-45820` — fflate before
+0.8.3 loops indefinitely in ZIP64 central-directory parsing when an entry
+declares `compressed_size=0xFFFFFFFF` without the extra-field tag `0x0001`,
+a denial of service reachable from a user-supplied book. Because the bundled
+copy carried no version, it was replaced rather than version-identified:
+`assets/foliate/ext/fflate.js` is now the official **fflate 0.8.3** ESM browser
+build (90,922 B) taken from the npm tarball.
+
+**Contract preserved:** `view.js:113-114` dynamically imports `./ext/fflate.js`
+and passes `fflate.unzlibSync` into `new MOBI({ unzlib })`; the replacement still
+exports `unzlibSync`.
+
+**Verified:** node round-trip against the committed copy —
+`unzlibSync(zlibSync(text))` returned 6,500 identical bytes.
+`@zip.js/zip.js` returns no advisories in OSV (package-wide query).
+
+**Still uncovered:** these two files are inferred from content rather than
+declared, and nothing records their versions, so future updates stay manual.
