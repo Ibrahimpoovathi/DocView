@@ -1122,3 +1122,36 @@ exports `unzlibSync`.
 
 **Still uncovered:** these two files are inferred from content rather than
 declared, and nothing records their versions, so future updates stay manual.
+
+## 2026-11-17 — Gradle wrapper: 9.3.1 → 9.9.1 (six advisories)
+
+The dependency scanner cannot resolve this repository's Gradle manifests — it
+reports both `.gradle.kts` files as unscanned — and OSV has no ecosystem entry
+for Gradle distributions. The wrapper was therefore checked directly against the
+Gradle project's published security advisories.
+
+**Found:** `android/gradle/wrapper/gradle-wrapper.properties` pinned **Gradle
+9.3.1**, affected by six advisories, three of them patched only in 9.9.1:
+
+| Advisory | Issue | Patched |
+| --- | --- | --- |
+| `GHSA-xwqc-3h47-hg64` | Deserialization of untrusted Java objects before authentication in client–daemon communication | 8.14.6, 9.8.1 |
+| `GHSA-mvvg-497x-hmj8` | Unauthenticated worker-to-daemon channel deserializes untrusted objects | 8.14.6, 9.8.1 |
+| `GHSA-j5m7-59rp-24f5` | Repositories failing SSL are not disabled, exposing builds to malicious artifacts | 8.14.6, 9.8.1 |
+| `GHSA-3cfg-jpcr-gfp3` | Version catalog values run as code in generated accessors | 8.14.7, 9.9.1 |
+| `GHSA-gqrr-4j89-5267` | Client trusts the content of the daemon registry | 8.14.7, 9.9.1 |
+| `GHSA-pcp8-98xm-c6pr` | Daemon client trusts stale registry entries (port squatting) | 8.14.7, 9.9.1 |
+
+**Fixed:** `distributionUrl` now points at `gradle-9.9.1-all.zip`, the first
+release that patches all six. The file declares no `distributionSha256Sum`, so
+no checksum needed updating; adding one would harden the download further.
+
+**Checked, not affected:** `GHSA-mqwm-5m85-gmcv` and `GHSA-w78c-w6vf-rw82`
+(patched in >= 9.3.0), plus every older advisory (patched at 8.x and below).
+
+**Still uncovered:** the transitive Maven graph beneath AGP and Kotlin. Resolving
+it needs an Android SDK and a Flutter toolchain, neither available here.
+
+**PDF note:** `view.js` imports `./pdf.js`, which is not shipped, but the import
+is unreachable — PDFs are rendered natively by `pdfrx` in Dart, never by the
+reader webview.
