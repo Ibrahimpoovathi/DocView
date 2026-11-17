@@ -994,3 +994,70 @@ library pane live and progress restored (8%).
 
 **Release**: 1.0.4+14, arm64 `releases/DocView.apk` rebuilt signed,
 battery defines absent.
+
+---
+
+## 1.0.5+15 — 2026-11-17 — Correctness + reader typography pass
+
+Post-1.0.4 review against the worklog: five audit findings were already
+covered by earlier stages and are **not** regressions (battery scaffolding is
+compile-time and tree-shaken; the renderer-crash dead-end, dependency pins,
+XLSX row virtualization and the silent-catch surface were all handled in
+Stages E/F and 1.0.4). The items below were still live in the code.
+
+**Fixes**
+
+- `settings_screen.dart`: the online-dictionary switch read
+  `?? true` while the lookup path used `?? false`, so a fresh install showed
+  the toggle **on** with lookups actually offline. Both now default to false
+  (Stage F intent: online lookup is opt-in). Added a **Recent lookups**
+  section — `LookupHistory` recorded every hit but nothing ever displayed it.
+  Words are tappable and re-open the sheet; Clear empties the list.
+- `dictionary_sheet.dart`: `_lookup()` only ever consulted `dicts.first`, so
+  a second imported StarDict was silently ignored. It now iterates every
+  imported dictionary and stops at the first non-empty hit, skips the online
+  fallback when an offline dictionary answered, and writes history only for
+  real hits. Providers are read before the first `await` so a dismissed sheet
+  cannot touch a disposed `ref`.
+- `reflow_screen.dart`:
+  - Scroll progress updated `_fraction` / `_permilleViewed` / `_location`
+    with no `setState`, so the bottom bar's slider and bookmark stayed stale
+    while reading. `onReflowProgress` now calls a 120 ms-coalesced
+    `_scheduleChromeRefresh()` instead of rebuilding per bridge event.
+  - `onLoadStop` called `setState` with no `mounted` guard — popping the route
+    mid-load threw.
+  - Search results could repopulate a search the user had already closed; the
+    handler returns early when `!_searchOpen` and the dead empty `if` is gone.
+  - `_jsonStr` now uses `jsonEncode` (it only escaped single quotes, so a TOC
+    href containing a backslash or newline broke the injected JS).
+  - **New typography controls**: a "Text size and spacing" sheet with font
+    size (70–180%) and line spacing (1.2–2.2) sliders plus Reset. Values are
+    global, persisted (`docview.fontPercent` / `docview.lineSpacing`), passed
+    in the page URL for the first paint, and applied live to every rendered
+    section through `window.docviewSetTypography`.
+  - Accessibility: highlight swatches have `Semantics` labels and 48 dp tap
+    targets; search excerpts honour the system font scale via `textScaler`.
+- `reader_chrome.dart`: optional `onTypography` action on the bottom bar
+  (null on the PDF reader, which has no reflowable text).
+- `office_screens.dart`: search-excerpt `RichText` honours `textScaler`.
+- `assets/foliate/docview.html`: `TYPO` state from `size`/`spacing` params,
+  `pageCSS()` drives `font-size`/`line-height`, and `injectStyles` /
+  `applyStyles` replace the no-op `renderer.setStyles` (this paginator has no
+  `setStyles`, so live restyling rewrites the injected `<style>` in each live
+  content document via `getContents()`).
+- `.github/workflows/ci.yml`: `flutter analyze` + `flutter test` on push and
+  PR — the tests existed but nothing ran them automatically.
+- `pubspec.yaml`: 1.0.5+15.
+
+**Verification (and its limits)**
+
+- AppJet `project` preset: source review passed (128 files, no conflict
+  markers).
+- Dependency security: 198 Pub packages, 0 high/critical findings; reported
+  **incomplete** because the Android Gradle files have no resolved lockfile.
+- No Flutter/Dart SDK in this environment, so `flutter analyze`,
+  `flutter test` and an APK build were **not** run here. Every changed call
+  site was checked against its real signature (`showDictionarySheet(context,
+  ref, word)`, `ImportedDict.bookName`, `DictionaryEntry.meanings`,
+  `LookupHistory.recent/record/clear`, `paginator.getContents()`). The new CI
+  workflow is what should confirm analyze/test green on the next push.
