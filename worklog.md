@@ -1205,3 +1205,85 @@ without being able to generate the lockfile would break the build instead of
 fixing the scan. Versions were not invented to satisfy the scanner either.
 Dependabot (`gradle` ecosystem, weekly) keeps the declared plugin and artifact
 versions current in the meantime.
+
+## The Android graph, resolved: ten advisories on the build toolchain
+
+The scanner cannot resolve the Android graph because there is no lockfile. A
+Gradle run is refused in this environment, but the *published* graph can still be
+resolved with Maven — same coordinates, same two repositories
+(`dl.google.com/dl/android/maven2`, `repo1.maven.org`), real published versions:
+
+```
+com.android.tools.build:gradle:9.1.0
+org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.21
+```
+
+**109 distinct artifacts resolved.** All 109 were queried against OSV in a single
+batch request. **Six artifacts carry ten advisories** — and every one of them sits
+on the build toolchain (AGP's compiler classpath), not in the shipped APK:
+
+| Artifact | Resolved | Advisory | Severity | Fixed in |
+|---|---|---|---|---|
+| `org.bouncycastle:bcprov-jdk18on` | 1.79 | GHSA-574f-3g2m-x479 / CVE-2025-14813 — GOST 28147 CTR reuses keystream after 255 blocks | **Critical** | 1.84 |
+| | | GHSA-9pwp-9qqc-pr26 / CVE-2026-8763 — name-constraints bypass via trailing dot | **Critical** | 1.85 |
+| | | GHSA-p93r-85wp-75v3 / CVE-2026-5598 — covert timing channel | High | 1.84 |
+| | | GHSA-qp49-qgx5-5m26 / CVE-2026-13506 — lazy ASN.1 sequence resets nesting-depth guard | High | 1.85 |
+| | | GHSA-c3fc-8qff-9hwx / CVE-2026-0636 — LDAP injection | Moderate | 1.84 |
+| `com.google.guava:guava` | 33.3.1-jre | GHSA-xxph-c9ww-hj94 / CVE-2026-102554 — CompactHashMap/Set/MapMakerInternalMap deserialization drives uncontrolled allocation | **High** | 33.7.2 |
+| `org.jdom:jdom2` | 2.0.6 | GHSA-2363-cqg2-863c / CVE-2021-33813 — XXE injection | **High** | 2.0.6.1 |
+| `org.bitbucket.b_c:jose4j` | 0.9.5 | GHSA-3677-xxcr-wjqv / CVE-2024-29371 — DoS via compressed JWE content | **High** | 0.9.6 |
+| `org.bouncycastle:bcpkix-jdk18on` | 1.79 | GHSA-wg6q-6289-32hp / CVE-2026-5588 — broken/risky cryptographic algorithm | Moderate | 1.84 |
+| `org.apache.commons:commons-lang3` | 3.16.0 | GHSA-j288-q9x7-2f5v / CVE-2025-48924 — uncontrolled recursion on long input | Moderate | 3.18.0 |
+
+Severity and fixed versions come from the OSV records themselves, not from
+guesswork.
+
+### The fixed set was resolved before being recommended
+
+Re-resolving the same graph with the six patched versions declared produced a
+clean build (exit 0), with exactly the intended versions winning:
+
+```
+com.google.guava:guava          33.7.2
+org.apache.commons:commons-lang3 3.18.0
+org.bitbucket.b_c:jose4j        0.9.6
+org.bouncycastle:bcpkix-jdk18on 1.85
+org.bouncycastle:bcprov-jdk18on 1.85
+org.jdom:jdom2                  2.0.6.1
+```
+
+`bcprov`/`bcpkix` land on **1.85** rather than 1.84 because two of the five
+BouncyCastle advisories (name-constraints bypass, ASN.1 depth guard) first ship a
+fix in 1.85.
+
+### Why these pins are not written into the build files here
+
+- They are **transitive** dependencies of AGP, pulled through the `plugins {}`
+  classpath. A `configurations.all { resolutionStrategy { force(...) } }` block in
+  the app module does not govern that classpath — it would be a silent no-op that
+  reads like a fix.
+- Forcing them for real means either a `buildscript { configurations.classpath {
+  resolutionStrategy { ... } } }` restructuring or an AGP release whose POM ships
+  the patched versions. Both need a Gradle run to verify, and an unverified
+  classpath override fails inside AGP with `NoSuchMethodError` rather than a clear
+  error.
+- These artifacts are **not packaged into the APK**. Their exposure is build-time:
+  an XXE or deserialization issue here affects the machine that builds the app, not
+  the reader on a phone. That lowers urgency but does not make it zero.
+
+### The remediation, on a machine that can build
+
+1. Upgrade AGP (currently `9.1.0`) to the newest `9.x` and re-resolve — if its POM
+   ships the patched versions, nothing else is needed; or
+2. add a buildscript-classpath `resolutionStrategy { force(...) }` with the six
+   versions above, then run a full `assembleDebug`.
+3. Either way, re-run the Maven resolution and confirm zero advisories before
+   merging.
+
+**Caveat, stated plainly:** Maven resolves conflicts nearest-wins, Gradle
+highest-wins, so this 109-artifact graph is a close reproduction of the app's
+resolution, not an identical one. It is real published metadata — not invented
+versions — and it is the first time the Android side has been inspected at all.
+
+This does **not** change the scanner's `incomplete` status: only the lockfile
+does that.
